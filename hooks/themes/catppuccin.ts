@@ -13,7 +13,7 @@ const skin: Skin = {
     other: '#bac2de',
     user: '#cba6f7',
     fg: '#cdd6f4',
-    muted: '#7f849c',
+    muted: '#888da3',
     surface: '#252536',
     zebra: '#232334',
     ok: '#a6e3a1',

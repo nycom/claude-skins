@@ -1,5 +1,6 @@
 import type { CustomSkin, SkinSlot } from '../types'
 import type { Skin } from './skin'
+import { toLight } from './light'
 import { SKINS } from './themes'
 
 export const SLOTS: readonly SkinSlot[] = [
@@ -68,10 +69,20 @@ export function resolveSkin(name: string, custom: Customs): Skin | undefined {
     return undefined
   }
 
+  const palette = { ...base.palette, ...made.palette }
+  // The base's light palette, with the slots that were changed derived afresh for light.
+  const changed = toLight(palette)
+  const light = { ...(base.light ?? toLight(base.palette)) }
+
+  for (const slot of Object.keys(made.palette) as SkinSlot[]) {
+    light[slot] = changed[slot]
+  }
+
   return {
     name: made.name,
     label: made.label,
-    palette: { ...base.palette, ...made.palette },
+    palette,
+    light,
     spinner: made.spinner.length > 0 ? made.spinner : base.spinner,
     done: made.done.length > 0 ? made.done : base.done,
   }
