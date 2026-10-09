@@ -326,6 +326,10 @@ test('token counts read compactly, and a reset reads as a time today, tomorrow o
   const fridayMorning = new Date(2026, 9, 9, 9, 30).getTime()
   expect(resetLabel(new Date(2026, 9, 16, 9, 0).toISOString(), fridayMorning)).toBe('next Fri 9:00am')
   expect(resetLabel(new Date(2026, 9, 15, 9, 0).toISOString(), fridayMorning)).toBe('Thu 9:00am')
+  // Up to 13 days off is the next week's weekday; from two weeks off a weekday names the wrong week, so a date.
+  expect(resetLabel(new Date(2026, 9, 22, 9, 0).toISOString(), fridayMorning)).toBe('next Thu 9:00am')
+  expect(resetLabel(new Date(2026, 9, 23, 9, 0).toISOString(), fridayMorning)).toBe('Oct 23 9:00am')
+  expect(resetLabel(new Date(2026, 10, 3, 9, 0).toISOString(), fridayMorning)).toBe('Nov 3 9:00am')
   // A reset already gone, seen before the next reading, names no time: the window has reset.
   expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), new Date(2026, 9, 10, 9, 0).getTime())).toBeUndefined()
   expect(resetLabel(new Date(2026, 9, 9, 11, 0).toISOString(), now)).toBeUndefined()

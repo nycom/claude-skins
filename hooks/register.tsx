@@ -159,6 +159,9 @@ const freshRows = (key: string | undefined, segments: readonly Segment[]): (numb
 // more draw settles them.
 const ramp = rampFrom()
 let settle: { cancel(): void } | undefined
+// A reset's label changes at local midnight (`tmrw` to today's time) and when it passes (to
+// none); nothing else redraws the band then, so one timer wakes it at the sooner of the two.
+let relabel: { at: number; timer: { cancel(): void } } | undefined
 
 // What the settings said when last read.
 type ConfigMemo = Awaited<ReturnType<typeof refreshTheme>>
@@ -701,6 +704,20 @@ reply width: ${lastColumns} columns`
         settle = undefined
         return update($, usageAtom, usage => ({ ...usage }))
       })
+    }
+
+    const today = new Date(now)
+    const resets = usage.limits.map(limit => Date.parse(limit.resetsAt ?? '')).filter(at => at > now)
+    const due = Math.min(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), ...resets)
+    if (resets.length > 0 && relabel?.at !== due) {
+      relabel?.timer.cancel()
+      relabel = {
+        at: due,
+        timer: $.clock.after(due - now, () => {
+          relabel = undefined
+          return update($, usageAtom, usage => ({ ...usage }))
+        }),
+      }
     }
 
     return (

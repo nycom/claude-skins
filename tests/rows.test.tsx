@@ -942,6 +942,33 @@ test('a band left on screen settles by itself once its rings have grown', async 
   await band.unmount()
 })
 
+test('a band left on screen relabels its reset at midnight and drops it once the reset passes', async ($, on) => {
+  // Friday 23:00, the 7d window resetting Saturday 9:00.
+  const clock = mock.clock(on, { now: new Date(2026, 9, 9, 23, 0).getTime() })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { window: 200000, percent: 40 }, rateLimits: [{ kind: 'seven_day', percentUsed: 23, resetsAt: new Date(2026, 9, 10, 9, 0).toISOString() }] },
+  }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const band = await $.ui.mount(BAND('desktop', false))
+  const alt = async () => ((await band.find({ type: 'Svg' })) as { props: { alt: string } } | undefined)?.props.alt ?? ''
+
+  expect(await alt()).toContain('7d 23% (resets tomorrow 9:00am)')
+  // Saturday 8:00: the same reset, now today's.
+  await clock.advance(9 * 60 * 60 * 1000)
+  expect(await alt()).toContain('7d 23% (resets 9:00am)')
+  // Saturday 10:00: the window has reset, so no time is named.
+  await clock.advance(2 * 60 * 60 * 1000)
+  expect(await alt()).toContain('7d 23%')
+  expect(await alt()).not.toContain('resets')
+  await band.unmount()
+})
+
 test('from 70% with Compact offered the context ring pulses, unless motion is reduced', async ($, on) => {
   mock.clock(on)
   let percent = 65
