@@ -1098,6 +1098,71 @@ test('the context ring chases faster in warn from 70% with Compact offered, and 
   expect(held(await ring())).toBe(true)
 })
 
+test('the band, a running arc and the spinner, drawn again later, carry on where they were', async ($, on) => {
+  const clock = stubEngine(on)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const spinner = { ...SITE, surface: 'desktop', component: 'Spinner', requestId: 'main', props: { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } } as const
+  const running = toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'live-sh', isRunning: true }), 'desktop')
+  const delays = async () => {
+    const found: number[] = []
+    for (const element of [BAND('desktop', false), running, spinner]) {
+      const ui = await $.ui.mount(element)
+      found.push(...[...(await svgOf(ui)).source.matchAll(/s (?:ease-in-out|linear) (-?\d+)ms infinite/g)].map(m => Number(m[1])))
+      await ui.unmount()
+    }
+    return found
+  }
+
+  // A band whose rings have grown, so it is drawn as of now.
+  await delays()
+  await clock.advance(1500)
+  const first = await delays()
+  await clock.advance(370)
+  const later = await delays()
+  expect(first.length).toBeGreaterThan(2)
+  // Each loop is 370ms further on: its delay 370ms more negative, or wrapped round its period.
+  later.forEach((delay, i) => expect(delay === (first[i] ?? NaN) - 370 || delay > (first[i] ?? NaN)).toBe(true))
+  expect(later).not.toEqual(first)
+})
+
+test('a band redrawn while its rings grow is the same image, so the growth does not replay', async ($, on) => {
+  let percent = 40
+  const clock = mock.clock(on, { now: 10_000 })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const ring = async () => {
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    const band = await $.ui.mount(BAND('desktop', false))
+    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    await band.unmount()
+    return source
+  }
+
+  await ring()
+  await clock.advance(1500)
+  await ring()
+  percent = 55
+  const growing = await ring()
+  expect(growing).toContain('@keyframes fill0{')
+  await clock.advance(400)
+  expect(await ring()).toBe(growing)
+  // Settled, the chase carries on from where the growing image had it.
+  await clock.advance(1100)
+  const settled = await ring()
+  expect(settled).not.toContain('@keyframes fill')
+  const delays = (source: string) => [...source.matchAll(/ease-in-out (-?\d+)ms infinite/g)].map(m => Number(m[1]))
+  const lag = (a: number, b: number) => (((a - b - 1500) % 3000) + 3000) % 3000
+  delays(settled).forEach((delay, i) => expect(Math.min(lag(delays(growing)[i] ?? NaN, delay), 3000 - lag(delays(growing)[i] ?? NaN, delay))).toBeLessThanOrEqual(2))
+})
+
 // A Friday noon, in local time so the reset labels hold in any time zone.
 const NOON = new Date(2026, 9, 9, 12, 0).getTime()
 

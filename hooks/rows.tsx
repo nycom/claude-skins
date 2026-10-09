@@ -33,6 +33,8 @@ export type Look = {
   svg?: SvgElement
   // Puts text on the clipboard of the surface drawing; absent where nothing can copy.
   copy?: (text: string) => void
+  // When the row is drawn, in ms, so a moving icon or ring drawn again carries on mid-cycle.
+  now?: number
 }
 
 export type Call = {
@@ -163,7 +165,7 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
 function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>) {
   const { Box } = look.ui
   const { color, word, mark } = status(look, calls)
-  const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark)
+  const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark, look.now)
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
@@ -240,7 +242,7 @@ export function desktopSpinnerRow(look: Look, Svg: SvgElement, mode: SpinnerMode
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={spinnerIcon(mode, look.skin.palette.user)} alt={mode} width={20} height={20} />
+      <Svg source={spinnerIcon(mode, look.skin.palette.user, look.now)} alt={mode} width={20} height={20} />
       <Text color={look.skin.palette.muted}>{text}</Text>
     </Box>
   )
@@ -540,7 +542,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 
     if (look.svg !== undefined) {
       const Svg = look.svg
-      const built = usageSvg(view.meters, palette, starts, view.breakdown)
+      const built = usageSvg(view.meters, palette, starts, view.breakdown, look.now)
 
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
         return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />

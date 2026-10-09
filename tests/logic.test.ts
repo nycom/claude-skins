@@ -6,7 +6,8 @@ import { runDesign } from '../hooks/designer'
 import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
-import { MAX_ALT } from '../hooks/svg-kit'
+import { holdStill, MAX_ALT } from '../hooks/svg-kit'
+import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
@@ -382,7 +383,7 @@ test('the context ring is a jog ring whose unlit segments chase toward 12, faste
   expect(full).not.toContain('dim 1.2s')
   expect(chase(99)).toMatchObject({ angles: [240], colors: [palette.err], seconds: [1.2] })
   expect(band(99)).toContain('@keyframes dim{50%{opacity:.6}}')
-  expect(band(99)).toContain(',dim 1.2s ease-in-out infinite"')
+  expect(band(99)).toContain(',dim 1.2s ease-in-out 0ms infinite"')
 
   // The plan rings share the twelve segments under their own masks, square-ended, in their
   // meter colour; well short of the limit they hold still.
@@ -435,6 +436,87 @@ test('a plan ring is a still jog ring until 80%, then chases in the warning colo
   const both = usageSvg([{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }], palette).source
   expect(both).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
   expect(both).toContain('@keyframes jog1{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
+})
+
+// Every looping animation in an image, in order: its name, period in ms and delay in ms.
+const loops = (source: string) =>
+  [...source.matchAll(/(\w+) ([\d.]+)s (?:ease-in-out|ease-out|linear) (-?\d+)ms infinite/g)].map(m => ({ name: m[1], period: Number(m[2]) * 1000, delay: Number(m[3]) }))
+
+// Whether a loop delayed `a` lags one delayed `b` by `ms`, in a loop `period` long, within
+// a rounding ms: a delay further below zero is further on.
+const lags = (a: number, b: number, ms: number, period: number) => {
+  const off = (((a - b - ms) % period) + period) % period
+  return Math.min(off, period - off) <= 2
+}
+
+test('a band drawn again carries every chase and the dim on mid-cycle, and grows its fill once', async () => {
+  const { palette } = tokyoNight
+  const t = 1_760_000_123_456
+  for (const meters of [
+    [{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }, { label: '7d', percent: 96 }],
+    [{ label: 'context', percent: 20 }],
+    [{ label: 'context', percent: 99 }],
+  ]) {
+    const starts = meters.map(meter => meter.percent - 10)
+    const first = usageSvg(meters, palette, starts, undefined, t).source
+    const later = usageSvg(meters, palette, starts, undefined, t + 370).source
+    const [a, b] = [loops(first), loops(later)]
+
+    expect(a.length).toBeGreaterThan(0)
+    expect(b.map(loop => loop.name)).toEqual(a.map(loop => loop.name))
+    a.forEach((loop, i) => expect(lags(loop.delay, b[i]?.delay ?? NaN, 370, loop.period)).toBe(true))
+    // The fill grows once, from the same start, with no delay, in both drawings.
+    expect(first.match(/@keyframes fill0\{[^}]*\}\}/)?.[0]).toBe(later.match(/@keyframes fill0\{[^}]*\}\}/)?.[0])
+    expect(first).toMatch(/animation:fill0 \.9s cubic-bezier\(\.2,\.8,\.2,1\)[,"]/)
+  }
+
+  // Each segment of a chase still lights a step after the one before it.
+  const chase = loops(usageSvg([{ label: 'context', percent: 74 }], palette, [74], undefined, t).source)
+  expect(chase.map(loop => loop.name)).toEqual(['jog0', 'jog0', 'jog0'])
+  chase.forEach((loop, n) => expect(lags(loop.delay, chase[0]?.delay ?? NaN, n * 240, 2400)).toBe(true))
+  expect(loops(usageSvg([{ label: 'context', percent: 99 }], palette, [99], undefined, t).source).map(loop => loop.name)).toEqual(['dim', 'jog0'])
+})
+
+test('a band with nothing moving, or held still, draws the same image whenever it draws', async () => {
+  const { palette } = tokyoNight
+  const plans = [{ label: '5h', percent: 40 }, { label: '7d', percent: 79 }]
+  expect(usageSvg(plans, palette, [40, 79], undefined, 1000).source).toBe(usageSvg(plans, palette, [40, 79], undefined, 1370).source)
+
+  holdStill(true)
+  try {
+    const meters = [{ label: 'context', percent: 99 }, { label: '5h', percent: 96 }]
+    const held = usageSvg(meters, palette, [99, 96], undefined, 1000).source
+    expect(held).toBe(usageSvg(meters, palette, [99, 96], undefined, 1370).source)
+    expect(held).toContain('*{animation:none!important}</style>')
+    expect(toolIcon('run', '#fff', true, undefined, 1000)).toBe(toolIcon('run', '#fff', true, undefined, 1370))
+  } finally {
+    holdStill(false)
+  }
+})
+
+test('a running arc and every spinner carry on mid-cycle when drawn again; a still icon holds no time', async () => {
+  const t = 1_760_000_123_456
+  const pairs = [
+    [toolIcon('run', '#fff', true, undefined, t), toolIcon('run', '#fff', true, undefined, t + 370)],
+    ...(['thinking', 'tool-use', 'responding', 'requesting'] as const).map(mode => [spinnerIcon(mode, '#fff', t), spinnerIcon(mode, '#fff', t + 370)]),
+  ]
+
+  for (const [first = '', later = ''] of pairs) {
+    const [a, b] = [loops(first), loops(later)]
+    expect(a.length).toBeGreaterThan(0)
+    expect(b.map(loop => loop.name)).toEqual(a.map(loop => loop.name))
+    a.forEach((loop, i) => expect(lags(loop.delay, b[i]?.delay ?? NaN, 370, loop.period)).toBe(true))
+  }
+
+  // The bars and the dots still rise one after another, .15s apart.
+  for (const mode of ['responding', 'requesting'] as const) {
+    const staggered = loops(spinnerIcon(mode, '#fff', t))
+    expect(staggered.length).toBe(3)
+    staggered.forEach((loop, n) => expect(lags(loop.delay, staggered[0]?.delay ?? NaN, n * 150, loop.period)).toBe(true))
+  }
+
+  expect(toolIcon('run', '#fff', false, undefined, t)).toBe(toolIcon('run', '#fff', false))
+  expect(toolIcon('run', '#fff', false, 'failed', t)).toBe(toolIcon('run', '#fff', false, 'failed'))
 })
 
 test('a long cell wraps on its words, breaks a word too long for the column, and keeps every word', async () => {

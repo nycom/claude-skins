@@ -567,7 +567,7 @@ reply width: ${lastColumns} columns`
     const diff = diffstat(e.props.output)
     const target = summarize(e.props.tool, e.props.input, await $.session.cwd())
 
-    return toolRow(lookOf($.ui.resolve(e), active, e.surface), e.props, kind, target, {
+    return toolRow({ ...lookOf($.ui.resolve(e), active, e.surface), now: await $.clock.now() }, e.props, kind, target, {
       ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
       ...(diff === null ? {} : diff),
     })
@@ -580,7 +580,7 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
-    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls)
+    return groupRow({ ...lookOf($.ui.resolve(e), active, e.surface), now: await $.clock.now() }, e.props.calls)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -690,7 +690,7 @@ reply width: ${lastColumns} columns`
     }
 
     if (e.surface !== 'terminal') {
-      const look = lookOf($.ui.resolve(e), active, e.surface)
+      const look = { ...lookOf($.ui.resolve(e), active, e.surface), now: await $.clock.now() }
 
       return look.svg === undefined
         ? next(e)
@@ -737,7 +737,9 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
-    const look = lookOf($.ui.resolve(e), active, e.surface)
+    const { starts, since } = ramp(meters, now)
+    const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
+    const look = { ...lookOf($.ui.resolve(e), active, e.surface), now: isGrowing ? since : now }
     const { Box } = look.ui
     const theirs = await next(e)
     // Compacting mid-turn would cut the turn's own context out from under it.
@@ -757,8 +759,7 @@ reply width: ${lastColumns} columns`
       )
     }
 
-    const starts = ramp(meters, now)
-    if (settle === undefined && starts.some((start, i) => start !== meters[i]?.percent)) {
+    if (settle === undefined && isGrowing) {
       settle = $.clock.after(SETTLE_MS, () => {
         settle = undefined
         return update($, usageAtom, usage => ({ ...usage }))

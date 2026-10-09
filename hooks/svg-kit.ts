@@ -117,6 +117,21 @@ export const still = (moving?: string): string =>
       ? `:not(${moving}){animation:none!important}${SYSTEM_HOLD}`
       : SYSTEM_HOLD
 
+// A looping animation's delay. An image drawn again is a new image, which starts its
+// animations over; given when it is drawn (`now`, in ms), a loop starts where it would be
+// had it run since the epoch, so a redraw carries on mid-cycle. `offset` is how far it
+// lags the loop's start, in seconds. Held still, or with no `now`, the delay is the offset,
+// so the image holds no time.
+export function loopDelay(now: number | undefined, seconds: number, offset = 0): string {
+  if (now === undefined || isStill) {
+    return `${Math.round(offset * 1000)}ms`
+  }
+
+  const into = (((now / 1000 - offset) % seconds) + seconds) % seconds
+
+  return `${-Math.round(into * 1000)}ms`
+}
+
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
   `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
 

@@ -1,7 +1,7 @@
 import type { UsageSnap } from '../types'
 import { compactCount, resetLabel } from './format'
 import type { Palette, Slot } from './skin'
-import { escape, FONT, measure, still } from './svg-kit'
+import { escape, FONT, loopDelay, measure, still } from './svg-kit'
 
 // The band above the prompt: how full the context window is and how much of each plan
 // limit is spent, as rings that fill in when they draw, and what fills the context, as a bar.
@@ -34,7 +34,9 @@ export const SETTLE_MS = 1200
 // the rest are drawn already full. A redraw at the same readings keeps the same starts, so it
 // draws the same image and nothing replays, until SETTLE_MS have passed: from then on the
 // rings are drawn settled, so an image the surface builds again has no growth left to play.
-export function rampFrom(): (meters: readonly Meter[], now: number) => readonly number[] {
+// `since` is when the readings changed: a band still growing is drawn as of then, so its
+// moving parts keep the same delays and its redraws stay the same image.
+export function rampFrom(): (meters: readonly Meter[], now: number) => { starts: readonly number[]; since: number } {
   const shown = new Map<string, number>()
   let key = ''
   let changedAt = 0
@@ -52,7 +54,7 @@ export function rampFrom(): (meters: readonly Meter[], now: number) => readonly 
       starts = meters.map(meter => meter.percent)
     }
 
-    return starts
+    return { starts, since: changedAt }
   }
 }
 
@@ -167,8 +169,9 @@ const PLAN_TIERS: readonly JogTier[] = [
 const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${meter.note === undefined ? '' : ` · ${meter.note}`}`
 
 // `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
-// The breakdown bar follows the rings; it never animates, so a redraw is the same image.
-export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], breakdown?: Breakdown): { source: string; width: number; height: number; alt: string } {
+// The breakdown bar follows the rings; it never animates. `now` is when the band is drawn, in
+// ms: a redraw is a new image, so the chases and the dim pick up where they were (see loopDelay).
+export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], breakdown?: Breakdown, now?: number): { source: string; width: number; height: number; alt: string } {
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
   const lefts: number[] = []
@@ -191,7 +194,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
       // Each ring has its own keyframes, from where it was to where it is; none when it did not move.
       const moves = [
         ...(start === filled ? [] : [`fill${i} .9s cubic-bezier(.2,.8,.2,1)`]),
-        ...(jog !== undefined && isContext && meter.percent >= JOG_DIM ? [`dim ${jog.seconds}s ease-in-out infinite`] : []),
+        ...(jog !== undefined && isContext && meter.percent >= JOG_DIM ? [`dim ${jog.seconds}s ease-in-out ${loopDelay(now, jog.seconds)} infinite`] : []),
       ]
       const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
       ramps.push(start === filled ? '' : `@keyframes fill${i}{from{stroke-dasharray:${start} ${circumference}}}`)
@@ -216,7 +219,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
         // Held still, only the next segment up shows, at .4.
         ring.push(
           ...Array.from({ length: count }, (_, n) =>
-            `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${segment} ${circumference}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${x} ${CY})" style="animation:jog${i} ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
+            `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${segment} ${circumference}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${x} ${CY})" style="animation:jog${i} ${jog.seconds}s ease-in-out ${loopDelay(now, jog.seconds, n * step)} infinite"/>`,
           ),
         )
       }
