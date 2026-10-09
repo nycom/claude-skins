@@ -14,8 +14,8 @@ import { PX_PER_COLUMN, cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { partCells, partNames, usageLine, usageSvg } from './svg-usage'
-import type { Breakdown, Meter, Part } from './svg-usage'
+import { partCells, usageLine, usageSvg } from './svg-usage'
+import type { Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
 export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button'>
@@ -502,13 +502,13 @@ export const COMPACT_NUDGE = 70
 export const COMPACT_HOTKEY = 'c'
 
 // What the band shows past the rings, by how many of its extras are kept: a narrow band
-// drops the breakdown's labels first, then its bar, then the resets, then the tokens.
-const EXTRAS = 4
+// drops the breakdown bar first, then the resets, then the tokens.
+const EXTRAS = 3
 
-function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: number): { meters: Meter[]; breakdown?: Breakdown } {
+function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: number): { meters: Meter[]; parts: readonly Part[] } {
   return {
     meters: meters.map(meter => (kept >= 2 || (kept === 1 && meter.label === 'context') ? meter : { label: meter.label, percent: meter.percent })),
-    ...(kept >= 3 && parts.length > 0 ? { breakdown: { parts, isLabelled: kept === EXTRAS } } : {}),
+    parts: kept === EXTRAS ? parts : [],
   }
 }
 
@@ -522,7 +522,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 
     if (look.svg !== undefined) {
       const Svg = look.svg
-      const built = usageSvg(view.meters, palette, starts, isPulsing, view.breakdown)
+      const built = usageSvg(view.meters, palette, starts, isPulsing, view.parts)
 
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
         return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
@@ -532,9 +532,8 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
     }
 
     const line = usageLine(view.meters)
-    const cells = view.breakdown === undefined ? [] : partCells(view.breakdown.parts)
-    const names = view.breakdown?.isLabelled ? ` ${partNames(view.breakdown.parts).join(' · ')}` : ''
-    const items = [...line.map(meter => meter.bar + meter.text), ...(cells.length > 0 ? [cells.map(cell => cell.cells).join('') + names] : [])]
+    const cells = partCells(view.parts)
+    const items = [...line.map(meter => meter.bar + meter.text), ...(cells.length > 0 ? [cells.map(cell => cell.cells).join('')] : [])]
     const width = items.reduce((sum, item) => sum + widthOf(item), 3 * (items.length - 1))
 
     if (kept === 0 || width <= room) {
@@ -547,11 +546,10 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
             </Text>
           ))}
           {cells.length > 0 ? (
-            <Text color={palette.muted}>
+            <Text>
               {cells.map(cell => (
                 <Text color={palette[cell.slot]}>{cell.cells}</Text>
               ))}
-              {names}
             </Text>
           ) : (
             ''

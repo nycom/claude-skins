@@ -306,25 +306,29 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
   expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
 })
 
-test('on a skin with one colour for every part, the breakdown steps its parts down in opacity, largest first', async () => {
+test('the breakdown bar draws no names, its alt carries every part, and one-colour parts step down in opacity', async () => {
   const parts = partsOf([{ name: 'Messages', tokens: 61 }, { name: 'System tools', tokens: 22 }, { name: 'System prompt', tokens: 9 }, { name: 'Memory files', tokens: 8 }])
+  const opacitiesOf = (source: string): number[] => [...source.matchAll(/<rect class="part" [^>]*fill-opacity="([\d.]+)"/g)].map(m => Number(m[1]))
 
   for (const [palette, bg] of [[noir.palette, '#262624'], [forTheme(noir, true).palette, LIGHT_BG]] as const) {
-    const { source } = usageSvg([{ label: 'context', percent: 48 }], palette, [], false, { parts, isLabelled: true })
-    const opacities = [...source.matchAll(/<rect class="part" [^>]*fill-opacity="([\d.]+)"/g)].map(m => Number(m[1]))
+    const { source, alt } = usageSvg([{ label: 'context', percent: 48 }], palette, [], false, parts)
 
-    expect(new Set(opacities.slice(0, 3)).size).toBe(3)
-    // Each name reads in its segment's tone, at 4.5:1 on the page; each segment at 3:1 on the page and its track.
-    for (const [i, [name, slot]] of ([['msgs 61%', 'user'], ['tools 22%', 'run'], ['sys 9%', 'read']] as const).entries()) {
-      const opacity = opacities[i] ?? 1
-      expect(source).toContain(`fill:${palette[slot]};fill-opacity:${opacity}">${name}`)
-      expect(contrast(over(palette[slot], opacity, bg), bg)).toBeGreaterThanOrEqual(4.5)
+    expect(source).not.toContain('msgs')
+    expect(alt).toBe('context 48%; context holds msgs 61%, tools 22%, sys 9%, memory 8%')
+    expect(opacitiesOf(source)).toEqual([1, 0.8, 0.62, 0.48])
+    // The three largest segments read at 3:1 on the page and on their track.
+    for (const [i, slot] of (['user', 'run', 'read'] as const).entries()) {
+      const opacity = opacitiesOf(source)[i] ?? 1
+      expect(contrast(over(palette[slot], opacity, bg), bg)).toBeGreaterThanOrEqual(3)
       expect(contrast(over(palette[slot], opacity, bg), over(palette.muted, TRACK_OPACITY, bg))).toBeGreaterThanOrEqual(3)
     }
   }
 
-  // A skin with a colour per part keeps them at full strength.
-  expect(usageSvg([{ label: 'context', percent: 48 }], tokyoNight.palette, [], false, { parts, isLabelled: true }).source).not.toMatch(/opacity(="|:)0\.[68]/)
+  // A skin with a colour per part keeps them at full strength, and so do colours only near each other.
+  const near = { ...tokyoNight.palette, user: '#7aa2f7', run: '#7ba3f6', read: '#7ca4f5', write: '#7da5f4' }
+  for (const palette of [tokyoNight.palette, near]) {
+    expect(opacitiesOf(usageSvg([{ label: 'context', percent: 48 }], palette, [], false, parts).source)).toEqual([1, 1, 1, 1])
+  }
 })
 
 test('token counts read compactly, and a reset reads as a time today, tomorrow or on a weekday', async () => {

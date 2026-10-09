@@ -1056,12 +1056,13 @@ async function bandWith($: Engine, on: On, usage: (args: { breakdown?: string })
 
   const draw = async (surface: (typeof SURFACES)[number], columns = 200) => {
     const band = await $.ui.mount(BAND(surface, false, columns))
-    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source
+    const svg = (await band.find({ type: 'Svg' })) as { props: { source: string; alt: string } } | undefined
+    const source = svg?.props.source
     const text = JSON.stringify(await band.drawn())
     const width = ((await band.find({ type: 'Svg' })) as { props: { width: number } } | undefined)?.props.width ?? 0
     const hasCompact = (await band.find({ key: 'compact' })) !== undefined
     await band.unmount()
-    return { source: source ?? '', text, hasCompact, width }
+    return { source: source ?? '', alt: svg?.props.alt ?? '', text, hasCompact, width }
   }
 
   return { draw, asked }
@@ -1069,19 +1070,17 @@ async function bandWith($: Engine, on: On, usage: (args: { breakdown?: string })
 
 test('the band shows tokens on the context ring, resets on the plan rings, and the context breakdown', async ($, on) => {
   const { draw, asked } = await bandWith($, on, args => fullUsage(48, args))
-  const { source } = await draw('desktop')
+  const { source, alt } = await draw('desktop')
 
   // The breakdown is the local estimate, never the counted one that sends requests.
   expect(asked).toEqual(['summary'])
   expect(source).toContain('96k/200k')
   expect(source).toContain('2:40pm')
   expect(source).toContain('Mon 9:00am')
-  expect(source).toContain('msgs 61%')
-  expect(source).toContain('tools 22%')
-  expect(source).toContain('sys 9%')
-  // Only the top three are named; free space, the buffer and deferred tools are not content.
-  expect(source).not.toContain('memory 8%')
-  expect(source).not.toContain('Free')
+  // The bar draws no names; its alt reads every part. Free space, the buffer and deferred tools are not content.
+  expect(source).not.toContain('msgs')
+  expect(alt).toContain('context holds msgs 61%, tools 22%, sys 9%, memory 8%')
+  expect(alt).not.toContain('free')
   const palette = tokyoNight.palette
   expect(source).toContain(`class="part" x="`)
   for (const slot of ['user', 'run', 'read', 'write'] as const) {
@@ -1093,7 +1092,7 @@ test('the band shows tokens on the context ring, resets on the plan rings, and t
   expect(terminal.text).toContain('19% 5h · 2:40pm')
   expect(terminal.text).toContain('23% 7d · Mon 9:00am')
   expect(terminal.text).toContain('■')
-  expect(terminal.text).toContain('msgs 61%')
+  expect(terminal.text).not.toContain('msgs')
 })
 
 test('the band leaves out tokens and resets it was not given, and the breakdown when it fails', async ($, on) => {
@@ -1113,10 +1112,10 @@ test('the band leaves out tokens and resets it was not given, and the breakdown 
   expect((await draw('terminal')).text).not.toContain(' · ')
 })
 
-test('a narrow band drops the breakdown labels, then the bar, then the resets, then the tokens, and keeps Compact', { timeoutMs: 30_000 }, async ($, on) => {
+test('a narrow band drops the breakdown bar, then the resets, then the tokens, names no part at any width, and keeps Compact', { timeoutMs: 30_000 }, async ($, on) => {
   let percent = 55
   const { draw } = await bandWith($, on, args => fullUsage(percent, args))
-  const order = ['labels', 'bar', 'resets', 'tokens'] as const
+  const order = ['bar', 'resets', 'tokens'] as const
 
   for (const reading of [55, 85]) {
     percent = reading
@@ -1128,8 +1127,8 @@ test('a narrow band drops the breakdown labels, then the bar, then the resets, t
       for (let columns = 220; columns >= 20; columns -= 4) {
         const { source, text, hasCompact } = await draw(surface, columns)
         const drawn = surface === 'desktop' ? source : text
+        expect(`${surface} ${columns} named ${drawn.includes('msgs')}`).toBe(`${surface} ${columns} named false`)
         const shows = {
-          labels: drawn.includes('msgs 61%'),
           bar: drawn.includes(surface === 'desktop' ? 'class="part"' : '■'),
           resets: drawn.includes('2:40pm'),
           tokens: drawn.includes(`${reading * 2}k/200k`),
@@ -1144,7 +1143,7 @@ test('a narrow band drops the breakdown labels, then the bar, then the resets, t
       }
 
       // Wide enough for everything, narrow enough for none, and each step between.
-      expect(`${surface} ${reading}% ${[...seen].join(' | ')}`).toBe(`${surface} ${reading}% true,true,true,true | false,true,true,true | false,false,true,true | false,false,false,true | false,false,false,false`)
+      expect(`${surface} ${reading}% ${[...seen].join(' | ')}`).toBe(`${surface} ${reading}% true,true,true | false,true,true | false,false,true | false,false,false`)
     }
   }
 })
@@ -1169,7 +1168,7 @@ test('the band lays out across all of bodyColumns, which already leave the engin
   // Just the room for the whole image and the gap after it.
   const { source, text } = await draw('desktop', Math.ceil(width / 6.4) + 2)
 
-  expect(source).toContain('msgs 61%')
+  expect(source).toContain('class="part"')
   expect(text).not.toContain('paddingRight')
 })
 

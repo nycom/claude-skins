@@ -24,9 +24,6 @@ export type Meter = { label: string; percent: number; note?: string }
 // One part of what fills the context, as its share of it in percent.
 export type Part = { label: string; share: number; slot: Slot }
 
-// The breakdown bar, and whether its largest parts are named after it.
-export type Breakdown = { parts: readonly Part[]; isLabelled: boolean }
-
 // How long after a new reading the rings grow; past it they are drawn settled.
 export const SETTLE_MS = 1200
 
@@ -114,10 +111,6 @@ export function partsOf(parts: readonly { name: string; tokens: number }[]): Par
     }))
 }
 
-// The largest parts, named: `msgs 61%`.
-export const NAMED_PARTS = 3
-export const partNames = (parts: readonly Part[]): string[] => parts.slice(0, NAMED_PARTS).map(part => `${part.label} ${part.share}%`)
-
 // Where each part starts and ends along a bar `width` long.
 function partSpans(parts: readonly Part[], width: number): { part: Part; from: number; to: number }[] {
   const total = parts.reduce((sum, part) => sum + part.share, 0)
@@ -130,15 +123,16 @@ function partSpans(parts: readonly Part[], width: number): { part: Part; from: n
   })
 }
 
-// A part whose colour reads as an earlier part's, within 16 a channel, steps down in opacity,
-// so a skin that gives parts one colour, as noir does, still tells them apart: 1, .8, then .6,
-// which holds 3:1 on the track and the page.
-const isNear = (a: string, b: string): boolean => {
-  const other = channels(b)
-  return channels(a).every((value, i) => Math.abs(value - (other[i] ?? Number.NaN)) <= 16)
+// On a skin where two or more parts share one colour exactly, as noir does, the parts step
+// down in opacity in part order so they still tell apart; the first three hold 3:1 on the
+// track and the page. Colours that are only near each other stay at full strength.
+const STEPS = [1, 0.8, 0.62, 0.48, 0.38]
+const partOpacities = (parts: readonly Part[], palette: Palette): number[] => {
+  const colours = parts.map(part => channels(palette[part.slot]).join())
+  const isShared = new Set(colours).size < colours.length
+
+  return parts.map((_, i) => (isShared ? (STEPS[Math.min(i, STEPS.length - 1)] ?? 1) : 1))
 }
-const partOpacities = (parts: readonly Part[], palette: Palette): number[] =>
-  parts.map((part, i) => Math.max(6, 10 - 2 * parts.slice(0, i).filter(earlier => isNear(palette[earlier.slot], palette[part.slot])).length) / 10)
 
 // Accent while there is room; the warning colour from 80 %, the error colour from 95 %.
 export const meterColor = (percent: number, palette: Palette): string =>
@@ -155,7 +149,7 @@ const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${m
 
 // `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
 // The breakdown bar follows the rings; it never animates, so a redraw is the same image.
-export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], isPulsing = false, breakdown?: Breakdown): { source: string; width: number; height: number; alt: string } {
+export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], isPulsing = false, parts: readonly Part[] = []): { source: string; width: number; height: number; alt: string } {
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
   const lefts: number[] = []
@@ -192,27 +186,21 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
 
   let bar = ''
 
-  if (breakdown !== undefined && breakdown.parts.length > 0) {
+  if (parts.length > 0) {
     const left = width + 4
     const top = CY - BAR_H / 2
-    const opacities = partOpacities(breakdown.parts, palette)
+    const opacities = partOpacities(parts, palette)
     // A 1px gap parts the segments, so they read apart even where a skin gives them one colour.
-    const segments = partSpans(breakdown.parts, BAR_W)
+    const segments = partSpans(parts, BAR_W)
       .map((span, i) => ({ ...span, i }))
       .filter(span => span.to - span.from > 1)
       .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}" fill-opacity="${opacities[span.i]}"/>`)
-    const names = breakdown.isLabelled
-      ? `<text x="${left + BAR_W + 8}" y="${CY + 4}" font-size="12">${partNames(breakdown.parts)
-          .map((name, i) => `${i === 0 ? '' : `<tspan style="fill:${palette.muted}"> · </tspan>`}<tspan style="fill:${palette[breakdown.parts[i]?.slot ?? 'other']};fill-opacity:${opacities[i]}">${escape(name)}</tspan>`)
-          .join('')}</text>`
-      : ''
 
     bar = [
       `<rect x="${left}" y="${top}" width="${BAR_W}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${palette.muted}" fill-opacity="${TRACK_OPACITY}"/>`,
       ...segments,
-      names,
     ].join('')
-    width = left + BAR_W + (breakdown.isLabelled ? 8 + Math.ceil(measure(partNames(breakdown.parts).join(' · '), false, 12)) : 0) + 4
+    width = left + BAR_W + 4
   }
 
   const style = [
@@ -228,7 +216,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
     height,
     alt: [
       meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note.replace(/^tmrw/, 'tomorrow')})`}`).join(', '),
-      ...(bar === '' || breakdown === undefined ? [] : [`context holds ${partNames(breakdown.parts).join(', ')}`]),
+      ...(bar === '' ? [] : [`context holds ${parts.map(part => `${part.label} ${part.share}%`).join(', ')}`]),
     ].join('; '),
   }
 }
