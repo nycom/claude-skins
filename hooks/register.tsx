@@ -159,6 +159,9 @@ const freshRows = (key: string | undefined, segments: readonly Segment[]): (numb
 // more draw settles them.
 const ramp = rampFrom()
 let settle: { cancel(): void } | undefined
+// A reset's label changes at local midnight (`tmrw` to today's time) and when it passes (to
+// none); nothing else redraws the band then, so one timer wakes it at the sooner of the two.
+let relabel: { at: number; timer: { cancel(): void } } | undefined
 
 // What the settings said when last read.
 type ConfigMemo = Awaited<ReturnType<typeof refreshTheme>>
@@ -672,7 +675,12 @@ reply width: ${lastColumns} columns`
 
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
+    // With no mod's row above, what comes back is the engine's own band, by reference, which
+    // draws nothing without a survey; it is left out, so no empty row or gap sits above the rings.
+    // ponytail: only that bare pass-through is known to draw nothing; a mod's own Box around it
+    // may be its padding, border or height, so it keeps the gap. Look inside if a mod wraps it.
     const theirs = await next(e)
+    const above = theirs.type === 'engine' ? null : theirs
     // Compacting mid-turn would cut the turn's own context out from under it.
     // Runs Claude Code's own /compact, so the person sees its usual progress and result.
     // Work a press starts is abandoned when the press ends, which cancels a compaction
@@ -698,9 +706,23 @@ reply width: ${lastColumns} columns`
       })
     }
 
+    const today = new Date(now)
+    const resets = usage.limits.map(limit => Date.parse(limit.resetsAt ?? '')).filter(at => at > now)
+    const due = Math.min(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), ...resets)
+    if (resets.length > 0 && relabel?.at !== due) {
+      relabel?.timer.cancel()
+      relabel = {
+        at: due,
+        timer: $.clock.after(due - now, () => {
+          relabel = undefined
+          return update($, usageAtom, usage => ({ ...usage }))
+        }),
+      }
+    }
+
     return (
-      <Box flexDirection="column" rowGap={theirs && look.surface === 'desktop' ? 1 : 0}>
-        {theirs}
+      <Box flexDirection="column" rowGap={above !== null && look.surface === 'desktop' ? 1 : 0}>
+        {above}
         {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
       </Box>
     )

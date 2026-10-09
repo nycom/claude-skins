@@ -3,7 +3,6 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
-import { PX_PER_COLUMN } from '../hooks/svg-kit'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -472,15 +471,36 @@ test('the band sits last, nearest the prompt, below another mod’s row', async 
 
   for (const surface of SURFACES) {
     const band = await $.ui.mount(BAND(surface, false))
-    const column = (await band.drawn()) as { children: readonly unknown[] }
+    const column = (await band.drawn()) as { props: { rowGap?: number }; children: readonly unknown[] }
     const first = JSON.stringify(column.children[0])
     const last = JSON.stringify(column.children[column.children.length - 1])
 
     expect(first).toContain('PROGRESS')
     expect(last).not.toContain('PROGRESS')
     expect(last).toContain(surface === 'desktop' ? 'Svg' : '% context')
+    expect(column.props.rowGap ?? 0).toBe(surface === 'desktop' ? 1 : 0)
     await band.unmount()
   }
+})
+
+test('with nothing drawn above it, the band has no gap or empty row above its rings', async ($, on) => {
+  // What the skin's hook reaches when nothing beneath it draws: the engine's own band, by reference,
+  // which draws nothing without a survey.
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine', ref: 0 }))
+  stubEngine(on)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  const band = await $.ui.mount(BAND('desktop', false))
+  const column = (await band.drawn()) as { props: { rowGap?: number }; children: readonly unknown[] }
+
+  expect(column.props.rowGap ?? 0).toBe(0)
+  expect(column.children.map(child => (child as { type?: string }).type)).toEqual(['Box'])
+  expect(JSON.stringify(column.children[0])).toContain('Svg')
+  await band.unmount()
 })
 
 test('cards draw no background of their own', async ($, on) => {
@@ -922,6 +942,33 @@ test('a band left on screen settles by itself once its rings have grown', async 
   await band.unmount()
 })
 
+test('a band left on screen relabels its reset at midnight and drops it once the reset passes', async ($, on) => {
+  // Friday 23:00, the 7d window resetting Saturday 9:00.
+  const clock = mock.clock(on, { now: new Date(2026, 9, 9, 23, 0).getTime() })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { window: 200000, percent: 40 }, rateLimits: [{ kind: 'seven_day', percentUsed: 23, resetsAt: new Date(2026, 9, 10, 9, 0).toISOString() }] },
+  }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const band = await $.ui.mount(BAND('desktop', false))
+  const alt = async () => ((await band.find({ type: 'Svg' })) as { props: { alt: string } } | undefined)?.props.alt ?? ''
+
+  expect(await alt()).toContain('7d 23% (resets tomorrow 9:00am)')
+  // Saturday 8:00: the same reset, now today's.
+  await clock.advance(9 * 60 * 60 * 1000)
+  expect(await alt()).toContain('7d 23% (resets 9:00am)')
+  // Saturday 10:00: the window has reset, so no time is named.
+  await clock.advance(2 * 60 * 60 * 1000)
+  expect(await alt()).toContain('7d 23%')
+  expect(await alt()).not.toContain('resets')
+  await band.unmount()
+})
+
 test('from 70% with Compact offered the context ring pulses, unless motion is reduced', async ($, on) => {
   mock.clock(on)
   let percent = 65
@@ -1028,7 +1075,7 @@ test('the band shows tokens on the context ring, resets on the plan rings, and t
   expect(asked).toEqual(['summary'])
   expect(source).toContain('96k/200k')
   expect(source).toContain('2:40pm')
-  expect(source).toContain('Mon')
+  expect(source).toContain('Mon 9:00am')
   expect(source).toContain('msgs 61%')
   expect(source).toContain('tools 22%')
   expect(source).toContain('sys 9%')
@@ -1044,7 +1091,7 @@ test('the band shows tokens on the context ring, resets on the plan rings, and t
   const terminal = await draw('terminal')
   expect(terminal.text).toContain('48% context · 96k/200k')
   expect(terminal.text).toContain('19% 5h · 2:40pm')
-  expect(terminal.text).toContain('23% 7d · Mon')
+  expect(terminal.text).toContain('23% 7d · Mon 9:00am')
   expect(terminal.text).toContain('■')
   expect(terminal.text).toContain('msgs 61%')
 })
@@ -1108,10 +1155,12 @@ test('at 75% on a ~120 column terminal the rings, kept extras and the Compact co
   const { width, hasCompact } = await draw('desktop', columns)
   // The row's padding and gap, then the nudge and the 'Compact now' button, as the band reserves them.
   const controls = 5 + 2 + ('Compact now'.length + 6 + 2) + ('Context is 75% full'.length + 2)
+  // A column no narrower than the cards' calibrated 6.4px, so the row fits at any code font from there up.
+  const px = 6.4
 
   expect(hasCompact).toBe(true)
   expect(width).toBeGreaterThan(0)
-  expect(width + controls * PX_PER_COLUMN).toBeLessThanOrEqual(columns * PX_PER_COLUMN)
+  expect(width + controls * px).toBeLessThanOrEqual(columns * px)
 })
 
 test('the extras redraw as the same image at the same readings, hold still under Reduce motion', async ($, on) => {

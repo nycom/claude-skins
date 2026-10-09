@@ -71,7 +71,7 @@ export function limitLabel(kind: string): string {
   return name.replace(/_/g, ' ')
 }
 
-// `now` places each reset as a time today or a weekday further off.
+// `now` places each reset as a time today, tomorrow or on a weekday further off.
 export function metersOf(usage: UsageSnap, now: number): Meter[] {
   const tokens = usage.tokens === undefined || usage.window === undefined ? undefined : `${compactCount(usage.tokens)}/${compactCount(usage.window)}`
 
@@ -214,7 +214,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
     width,
     height,
     alt: [
-      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note})`}`).join(', '),
+      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note.replace(/^tmrw/, 'tomorrow')})`}`).join(', '),
       ...(bar === '' || breakdown === undefined ? [] : [`context holds ${partNames(breakdown.parts).join(', ')}`]),
     ].join('; '),
   }

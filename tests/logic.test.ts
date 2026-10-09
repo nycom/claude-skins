@@ -301,17 +301,39 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
   ])
   expect(meterColor(85, tokyoNight.palette)).toBe(tokyoNight.palette.warn)
   expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
+  // The ring reads `tmrw`; a reader hears the word.
+  expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
 })
 
-test('token counts read compactly, and a reset reads as a time today or a weekday further off', async () => {
+test('token counts read compactly, and a reset reads as a time today, tomorrow or on a weekday', async () => {
   expect([950, 1500, 96_000, 200_000, 999_700, 1_200_000].map(compactCount)).toEqual(['950', '1.5k', '96k', '200k', '1M', '1.2M'])
 
-  // Built from local times, so the expectations hold in any time zone.
+  // Built from local times, so the expectations hold in any time zone. A Friday noon.
   const now = new Date(2026, 9, 9, 12, 0).getTime()
   expect(resetLabel(new Date(2026, 9, 9, 14, 40).toISOString(), now)).toBe('2:40pm')
-  expect(resetLabel(new Date(2026, 9, 10, 0, 5).toISOString(), now)).toBe('12:05am')
-  expect(resetLabel(new Date(2026, 9, 10, 9, 0).toISOString(), now)).toBe('9:00am')
-  expect(resetLabel(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon')
+  expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), now)).toBe('11:00pm')
+  // Under a day away but on Saturday, so not a time that reads as already gone.
+  expect(resetLabel(new Date(2026, 9, 10, 0, 5).toISOString(), now)).toBe('tmrw 12:05am')
+  expect(resetLabel(new Date(2026, 9, 10, 9, 0).toISOString(), now)).toBe('tmrw 9:00am')
+  // Calendar days, not 24 hours: Saturday evening is still tomorrow.
+  expect(resetLabel(new Date(2026, 9, 10, 20, 0).toISOString(), now)).toBe('tmrw 8:00pm')
+  expect(resetLabel(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon 9:00am')
+  // Across a month: Saturday the 31st to Sunday the 1st, then Tuesday the 3rd.
+  const lastOfOctober = new Date(2026, 9, 31, 22, 0).getTime()
+  expect(resetLabel(new Date(2026, 10, 1, 9, 0).toISOString(), lastOfOctober)).toBe('tmrw 9:00am')
+  expect(resetLabel(new Date(2026, 10, 3, 9, 30).toISOString(), lastOfOctober)).toBe('Tue 9:30am')
+  // A week off falls on today's weekday, so it says which one; six days off is the coming weekday.
+  const fridayMorning = new Date(2026, 9, 9, 9, 30).getTime()
+  expect(resetLabel(new Date(2026, 9, 16, 9, 0).toISOString(), fridayMorning)).toBe('next Fri 9:00am')
+  expect(resetLabel(new Date(2026, 9, 15, 9, 0).toISOString(), fridayMorning)).toBe('Thu 9:00am')
+  // Up to 13 days off is the next week's weekday; from two weeks off a weekday names the wrong week, so a date.
+  expect(resetLabel(new Date(2026, 9, 22, 9, 0).toISOString(), fridayMorning)).toBe('next Thu 9:00am')
+  expect(resetLabel(new Date(2026, 9, 23, 9, 0).toISOString(), fridayMorning)).toBe('Oct 23 9:00am')
+  expect(resetLabel(new Date(2026, 10, 3, 9, 0).toISOString(), fridayMorning)).toBe('Nov 3 9:00am')
+  // A reset already gone, seen before the next reading, names no time: the window has reset.
+  expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), new Date(2026, 9, 10, 9, 0).getTime())).toBeUndefined()
+  expect(resetLabel(new Date(2026, 9, 9, 11, 0).toISOString(), now)).toBeUndefined()
+  expect(resetLabel(new Date(now).toISOString(), now)).toBeUndefined()
   expect(resetLabel(undefined, now)).toBeUndefined()
   expect(resetLabel('soon', now)).toBeUndefined()
 
