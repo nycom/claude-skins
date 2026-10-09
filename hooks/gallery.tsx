@@ -93,7 +93,7 @@ export function galleryPane(look: Look, columns: number) {
           )}
       {section(
         'Band above the prompt: normal, then nudging to compact',
-        usageBand(look, [{ label: 'context', percent: 42 }, { label: '5h', percent: 18 }], true, () => undefined),
+        usageBand(look, [{ label: 'context', percent: 55 }, { label: '5h', percent: 18 }], true, () => undefined),
         usageBand(look, [{ label: 'context', percent: 85 }, { label: '5h', percent: 61 }], true, () => undefined),
       )}
       {section('Band above a question', askBand(look, ['Approach', 'Store']))}

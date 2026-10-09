@@ -3,7 +3,7 @@
 A modern skin for Claude Code. A [mod](https://code.claude.com/docs/en/plugins/mods/overview) that
 redraws the transcript: tool calls with icons and timings, edits as diff cards, tables and code as
 animated cards, shell output in a terminal card, a spinner that shows what Claude is doing, and a band
-above the prompt with your context and plan limits and a Compact button. Seven skins, light and dark,
+above the prompt with your context and plan limits and, from 50% context, a Compact button. Seven skins, light and dark,
 a settings page, and your own agent can design a new skin with you.
 
 <img alt="The same Claude Code turn switching skins with /skin: noir, Tokyo Night, Dracula, Catppuccin" src="docs/demo.gif">
@@ -54,7 +54,7 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | Rings for context and each plan limit, a Compact button, and a nudge to compact from 70% context | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
+| Above the prompt | Rings for context and each plan limit, a Compact button from 50% context, and a nudge to compact from 70% | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |

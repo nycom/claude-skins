@@ -14,7 +14,7 @@ import { cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { usageLine, usageSvg } from './svg-usage'
+import { type From, usageLine, usageSvg } from './svg-usage'
 import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
@@ -489,6 +489,9 @@ export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, i
   return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text, 'Copy output')
 }
 
+// From this full, the band offers Compact; below it the button stays hidden.
+export const COMPACT_SHOW = 50
+
 // From this full, the band suggests compacting and makes it the main action.
 export const COMPACT_NUDGE = 70
 
@@ -497,13 +500,13 @@ export const COMPACT_NUDGE = 70
 // (`c: Compact`); the desktop's button is pressed with the pointer.
 export const COMPACT_HOTKEY = 'c'
 
-function meterView(look: Look, meters: readonly Meter[]) {
+function meterView(look: Look, meters: readonly Meter[], from?: From) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
   if (look.svg !== undefined) {
     const Svg = look.svg
-    const built = usageSvg(meters, palette)
+    const built = usageSvg(meters, palette, from)
 
     return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
   }
@@ -520,21 +523,22 @@ function meterView(look: Look, meters: readonly Meter[]) {
   )
 }
 
-// The band above the prompt: the meters, and a Compact button that becomes the main
-// action, with a word on why, once the context is full enough to be worth it.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void) {
+// The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
+// the main action, with a word on why, once the context is full enough to be worth it.
+export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, from?: From) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
   const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
   const isNudge = context >= COMPACT_NUDGE
+  const isOffered = canCompact && context >= COMPACT_SHOW
 
   return (
     // The right edge stays clear: the band draws its own collapse mark ([-]) there.
     <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      {meterView(look, meters)}
+      {meterView(look, meters, from)}
       <Box flexGrow={1} />
-      {canCompact && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
-      {canCompact ? (
+      {isOffered && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
+      {isOffered ? (
         <Button
           key="compact"
           label={isNudge ? 'Compact now' : 'Compact'}

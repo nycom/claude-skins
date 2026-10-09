@@ -676,3 +676,75 @@ test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards 
   const moving = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'rm3', isRunning: true }), 'desktop'))
   expect(holdsStill(((await moving.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(false)
 })
+
+test('the band hides Compact below 50% context and offers it, dimmed, from 50%', async ($, on) => {
+  let percent = 40
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  const low = await $.ui.mount(BAND('desktop', false))
+  expect(await low.find({ key: 'compact' })).toBeUndefined()
+  await low.unmount()
+
+  // The band's numbers refresh at session start, a turn's end, or a plan limit's move.
+  percent = 55
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const mid = await $.ui.mount(BAND('desktop', false))
+  expect(((await mid.find({ key: 'compact' })) as { props: { label?: string } } | undefined)?.props.label).toBe('Compact')
+  expect(await mid.find({ type: 'Text', text: 'Context is 55% full' })).toBeUndefined()
+  await mid.unmount()
+})
+
+test('a card animates on its first draw only: a redraw of the same row holds still', async ($, on) => {
+  stubEngine(on)
+  let theme = 'dark'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'enum', value: theme, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('config.set', ($, e) => ((theme = String(e.value)), { value: e.value }) as never)
+  const sourceOf = async (ui: { find: (q: { type: string }) => Promise<unknown> }) =>
+    ((await ui.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+  const held = '*{animation:none!important}</style>'
+
+  const shell = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'ToolResult', requestId: 'once-sh', props: { tool_use_id: 'once-sh', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false } })
+  const table = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'once-tb', props: { text: '| A | B |\n| --- | --- |\n| 1 | 2 |' } as never })
+  expect(await sourceOf(shell)).not.toContain(held)
+  expect(await sourceOf(table)).not.toContain(held)
+
+  // Any write the cards read (here a theme switch) draws them again: the rows must not rise in a second time.
+  await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { kind: 'engine' }, origin: { kind: 'composer' } } as never)
+  expect(await sourceOf(shell)).toContain(held)
+  expect(await sourceOf(table)).toContain(held)
+  await shell.unmount()
+  await table.unmount()
+})
+
+test('the context ring grows from its last reading, and a redraw at the same reading is the same image', async ($, on) => {
+  let percent = 40
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const ring = async () => {
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    const band = await $.ui.mount(BAND('desktop', false))
+    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    await band.unmount()
+    return source
+  }
+  const circumference = 2 * Math.PI * 8
+
+  expect(await ring()).toContain('@keyframes fill0{from{stroke-dasharray:0 ')
+  percent = 55
+  const grown = await ring()
+  expect(grown).toContain(`@keyframes fill0{from{stroke-dasharray:${(circumference * 40) / 100} `)
+  expect(await ring()).toBe(grown)
+})

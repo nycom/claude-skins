@@ -18,9 +18,9 @@ import { ICONS } from './skin'
 import type { Skin } from './skin'
 import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
-import { limitLabel, metersOf } from './svg-usage'
+import { limitLabel, metersOf, rampFrom } from './svg-usage'
 import { shortenPath } from './format'
-import { holdStill } from './svg-kit'
+import { drawOnce, holdStill } from './svg-kit'
 import { kindOf, summarize } from './tools'
 
 const SETTINGS = 'skins-settings'
@@ -109,10 +109,24 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
   const needsSystem = resolveLight(hints) !== resolveLight({ ...hints, systemDark: false })
   const isLight = resolveLight({ ...hints, systemDark: needsSystem ? await systemDark($) : undefined })
 
-  await update($, lightAtom, () => isLight)
+  // Every write redraws every card that reads it, so the minute's poll writes only a change.
+  if ((await read($, lightAtom)) !== isLight) await update($, lightAtom, () => isLight)
 
   return { followsSystem: needsSystem, reducesMotion: rows.find(row => row.key === 'reduceMotion')?.value === true }
 }
+
+// Rows whose cards have been drawn once; a later draw of one holds its card still (see drawOnce).
+// ponytail: grows by one id per card row for the session; a reload clears it.
+const drawn = new Set<string>()
+const redraw = (requestId: string | undefined): boolean => {
+  if (requestId === undefined) return false
+  const seen = drawn.has(requestId)
+  drawn.add(requestId)
+  return seen
+}
+
+// The band's rings grow from their last reading (see rampFrom).
+const ramp = rampFrom()
 
 // What the settings said when last read.
 type ConfigMemo = { followsSystem: boolean; reducesMotion: boolean }
@@ -489,7 +503,9 @@ reply width: ${lastColumns} columns`
       const diff = hunksOf(e.props.output)
 
       if (diff !== null) {
-        return diffCard(look, look.svg, diff, shortenPath(diff.path, await $.session.cwd()), columns)
+        const shown = shortenPath(diff.path, await $.session.cwd())
+
+        return drawOnce(redraw(e.requestId), () => diffCard(look, look.svg!, diff, shown, columns))
       }
     }
 
@@ -497,7 +513,7 @@ reply width: ${lastColumns} columns`
       const shell = shellOutputOf(e.props.output)
 
       if (shell !== null) {
-        return terminalCard(look, look.svg, shell, e.props.isErrored, columns)
+        return drawOnce(redraw(e.requestId), () => terminalCard(look, look.svg!, shell, e.props.isErrored, columns))
       }
     }
 
@@ -550,7 +566,9 @@ reply width: ${lastColumns} columns`
       void $.ui.copy({ text: copied, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
     }
 
-    return replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined)
+    return drawOnce(redraw(e.requestId), () =>
+      replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined),
+    )
   })
 
   // The terminal's spinner gets the skin's word with a shimmer; the desktop's keeps its
@@ -629,7 +647,7 @@ reply width: ${lastColumns} columns`
 
     return (
       <Box flexDirection="column">
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact)}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, ramp)}
         {theirs}
       </Box>
     )

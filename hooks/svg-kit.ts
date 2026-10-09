@@ -90,6 +90,19 @@ export const holdStill = (on: boolean): void => {
   isStill = on
 }
 
+// A surface swaps a card's image whenever its row is drawn again (a setting, a theme poll,
+// the host's own repaint), and a new image plays its rise-in again. So a row animates on
+// its first draw only; `draw` builds the card held still when this is a redraw.
+export function drawOnce<T>(isRedraw: boolean, draw: () => T): T {
+  const was = isStill
+  isStill = was || isRedraw
+  try {
+    return draw()
+  } finally {
+    isStill = was
+  }
+}
+
 // Holds every animation still: always under Claude Code's Reduce motion, else when the
 // system asks for reduced motion.
 export const still = (): string =>
