@@ -747,4 +747,8 @@ test('the context ring grows from its last reading, and a redraw at the same rea
   const grown = await ring()
   expect(grown).toContain(`@keyframes fill0{from{stroke-dasharray:${(circumference * 40) / 100} `)
   expect(await ring()).toBe(grown)
+  // The fill arc sits on its track: one centre per ring.
+  const centres = [...grown.matchAll(/<circle[^>]* cx="([\d.]+)" cy="([\d.]+)"/g)].map(m => `${m[1]},${m[2]}`)
+  expect(centres.length).toBe(2)
+  expect(centres[1]).toBe(centres[0])
 })
