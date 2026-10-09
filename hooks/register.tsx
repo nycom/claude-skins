@@ -672,7 +672,10 @@ reply width: ${lastColumns} columns`
 
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
+    // With no mod's row above, what comes back is the engine's own band, by reference, which
+    // draws nothing without a survey; it is left out, so no empty row or gap sits above the rings.
     const theirs = await next(e)
+    const above = theirs.type === 'engine' ? null : theirs
     // Compacting mid-turn would cut the turn's own context out from under it.
     // Runs Claude Code's own /compact, so the person sees its usual progress and result.
     // Work a press starts is abandoned when the press ends, which cancels a compaction
@@ -699,8 +702,8 @@ reply width: ${lastColumns} columns`
     }
 
     return (
-      <Box flexDirection="column" rowGap={theirs && look.surface === 'desktop' ? 1 : 0}>
-        {theirs}
+      <Box flexDirection="column" rowGap={above !== null && look.surface === 'desktop' ? 1 : 0}>
+        {above}
         {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
       </Box>
     )

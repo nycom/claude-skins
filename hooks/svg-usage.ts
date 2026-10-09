@@ -71,7 +71,7 @@ export function limitLabel(kind: string): string {
   return name.replace(/_/g, ' ')
 }
 
-// `now` places each reset as a time today or a weekday further off.
+// `now` places each reset as a time today, tomorrow or on a weekday further off.
 export function metersOf(usage: UsageSnap, now: number): Meter[] {
   const tokens = usage.tokens === undefined || usage.window === undefined ? undefined : `${compactCount(usage.tokens)}/${compactCount(usage.window)}`
 

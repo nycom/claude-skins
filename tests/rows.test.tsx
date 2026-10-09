@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
-import { PX_PER_COLUMN } from '../hooks/svg-kit'
+import { BAND_PX_PER_COLUMN } from '../hooks/svg-kit'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -472,15 +472,36 @@ test('the band sits last, nearest the prompt, below another mod’s row', async 
 
   for (const surface of SURFACES) {
     const band = await $.ui.mount(BAND(surface, false))
-    const column = (await band.drawn()) as { children: readonly unknown[] }
+    const column = (await band.drawn()) as { props: { rowGap?: number }; children: readonly unknown[] }
     const first = JSON.stringify(column.children[0])
     const last = JSON.stringify(column.children[column.children.length - 1])
 
     expect(first).toContain('PROGRESS')
     expect(last).not.toContain('PROGRESS')
     expect(last).toContain(surface === 'desktop' ? 'Svg' : '% context')
+    expect(column.props.rowGap ?? 0).toBe(surface === 'desktop' ? 1 : 0)
     await band.unmount()
   }
+})
+
+test('with nothing drawn above it, the band has no gap or empty row above its rings', async ($, on) => {
+  // What the skin's hook reaches when nothing beneath it draws: the engine's own band, by reference,
+  // which draws nothing without a survey.
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine', ref: 0 }))
+  stubEngine(on)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  const band = await $.ui.mount(BAND('desktop', false))
+  const column = (await band.drawn()) as { props: { rowGap?: number }; children: readonly unknown[] }
+
+  expect(column.props.rowGap ?? 0).toBe(0)
+  expect(column.children.map(child => (child as { type?: string }).type)).toEqual(['Box'])
+  expect(JSON.stringify(column.children[0])).toContain('Svg')
+  await band.unmount()
 })
 
 test('cards draw no background of their own', async ($, on) => {
@@ -1028,7 +1049,7 @@ test('the band shows tokens on the context ring, resets on the plan rings, and t
   expect(asked).toEqual(['summary'])
   expect(source).toContain('96k/200k')
   expect(source).toContain('2:40pm')
-  expect(source).toContain('Mon')
+  expect(source).toContain('Mon 9:00am')
   expect(source).toContain('msgs 61%')
   expect(source).toContain('tools 22%')
   expect(source).toContain('sys 9%')
@@ -1044,7 +1065,7 @@ test('the band shows tokens on the context ring, resets on the plan rings, and t
   const terminal = await draw('terminal')
   expect(terminal.text).toContain('48% context · 96k/200k')
   expect(terminal.text).toContain('19% 5h · 2:40pm')
-  expect(terminal.text).toContain('23% 7d · Mon')
+  expect(terminal.text).toContain('23% 7d · Mon 9:00am')
   expect(terminal.text).toContain('■')
   expect(terminal.text).toContain('msgs 61%')
 })
@@ -1102,6 +1123,15 @@ test('a narrow band drops the breakdown labels, then the bar, then the resets, t
   }
 })
 
+test('on a desktop band with room for them, the breakdown keeps its labels', async ($, on) => {
+  const { draw } = await bandWith($, on, args => fullUsage(48, args))
+  // 110 columns of the desktop's code font is about 880px, and the band with every extra about 740px.
+  const { source } = await draw('desktop', 110)
+
+  expect(source).toContain('msgs 61%')
+  expect(source).toContain('tools 22%')
+})
+
 test('at 75% on a ~120 column terminal the rings, kept extras and the Compact controls fit the row', async ($, on) => {
   const columns = 120
   const { draw } = await bandWith($, on, args => fullUsage(75, args))
@@ -1111,7 +1141,7 @@ test('at 75% on a ~120 column terminal the rings, kept extras and the Compact co
 
   expect(hasCompact).toBe(true)
   expect(width).toBeGreaterThan(0)
-  expect(width + controls * PX_PER_COLUMN).toBeLessThanOrEqual(columns * PX_PER_COLUMN)
+  expect(width + controls * BAND_PX_PER_COLUMN).toBeLessThanOrEqual(columns * BAND_PX_PER_COLUMN)
 })
 
 test('the extras redraw as the same image at the same readings, hold still under Reduce motion', async ($, on) => {

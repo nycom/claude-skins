@@ -303,15 +303,23 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
   expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
 })
 
-test('token counts read compactly, and a reset reads as a time today or a weekday further off', async () => {
+test('token counts read compactly, and a reset reads as a time today, tomorrow or on a weekday', async () => {
   expect([950, 1500, 96_000, 200_000, 999_700, 1_200_000].map(compactCount)).toEqual(['950', '1.5k', '96k', '200k', '1M', '1.2M'])
 
-  // Built from local times, so the expectations hold in any time zone.
+  // Built from local times, so the expectations hold in any time zone. A Friday noon.
   const now = new Date(2026, 9, 9, 12, 0).getTime()
   expect(resetLabel(new Date(2026, 9, 9, 14, 40).toISOString(), now)).toBe('2:40pm')
-  expect(resetLabel(new Date(2026, 9, 10, 0, 5).toISOString(), now)).toBe('12:05am')
-  expect(resetLabel(new Date(2026, 9, 10, 9, 0).toISOString(), now)).toBe('9:00am')
-  expect(resetLabel(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon')
+  expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), now)).toBe('11:00pm')
+  // Under a day away but on Saturday, so not a time that reads as already gone.
+  expect(resetLabel(new Date(2026, 9, 10, 0, 5).toISOString(), now)).toBe('tmrw 12:05am')
+  expect(resetLabel(new Date(2026, 9, 10, 9, 0).toISOString(), now)).toBe('tmrw 9:00am')
+  // Calendar days, not 24 hours: Saturday evening is still tomorrow.
+  expect(resetLabel(new Date(2026, 9, 10, 20, 0).toISOString(), now)).toBe('tmrw 8:00pm')
+  expect(resetLabel(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon 9:00am')
+  // Across a month: Saturday the 31st to Sunday the 1st, then Tuesday the 3rd.
+  const lastOfOctober = new Date(2026, 9, 31, 22, 0).getTime()
+  expect(resetLabel(new Date(2026, 10, 1, 9, 0).toISOString(), lastOfOctober)).toBe('tmrw 9:00am')
+  expect(resetLabel(new Date(2026, 10, 3, 9, 30).toISOString(), lastOfOctober)).toBe('Tue 9:30am')
   expect(resetLabel(undefined, now)).toBeUndefined()
   expect(resetLabel('soon', now)).toBeUndefined()
 
