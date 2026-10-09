@@ -1,5 +1,6 @@
 import type { UsageSnap } from '../types'
 import { compactCount, resetLabel } from './format'
+import { channels } from './light'
 import type { Palette, Slot } from './skin'
 import { escape, FONT, measure, still } from './svg-kit'
 
@@ -129,6 +130,16 @@ function partSpans(parts: readonly Part[], width: number): { part: Part; from: n
   })
 }
 
+// A part whose colour reads as an earlier part's, within 16 a channel, steps down in opacity,
+// so a skin that gives parts one colour, as noir does, still tells them apart: 1, .8, then .6,
+// which holds 3:1 on the track and the page.
+const isNear = (a: string, b: string): boolean => {
+  const other = channels(b)
+  return channels(a).every((value, i) => Math.abs(value - (other[i] ?? Number.NaN)) <= 16)
+}
+const partOpacities = (parts: readonly Part[], palette: Palette): number[] =>
+  parts.map((part, i) => Math.max(6, 10 - 2 * parts.slice(0, i).filter(earlier => isNear(palette[earlier.slot], palette[part.slot])).length) / 10)
+
 // Accent while there is room; the warning colour from 80 %, the error colour from 95 %.
 export const meterColor = (percent: number, palette: Palette): string =>
   percent >= 95 ? palette.err : percent >= 80 ? palette.warn : palette.user
@@ -184,13 +195,15 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
   if (breakdown !== undefined && breakdown.parts.length > 0) {
     const left = width + 4
     const top = CY - BAR_H / 2
+    const opacities = partOpacities(breakdown.parts, palette)
     // A 1px gap parts the segments, so they read apart even where a skin gives them one colour.
     const segments = partSpans(breakdown.parts, BAR_W)
+      .map((span, i) => ({ ...span, i }))
       .filter(span => span.to - span.from > 1)
-      .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}"/>`)
+      .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}" fill-opacity="${opacities[span.i]}"/>`)
     const names = breakdown.isLabelled
       ? `<text x="${left + BAR_W + 8}" y="${CY + 4}" font-size="12">${partNames(breakdown.parts)
-          .map((name, i) => `${i === 0 ? '' : `<tspan style="fill:${palette.muted}"> · </tspan>`}<tspan style="fill:${palette[breakdown.parts[i]?.slot ?? 'other']}">${escape(name)}</tspan>`)
+          .map((name, i) => `${i === 0 ? '' : `<tspan style="fill:${palette.muted}"> · </tspan>`}<tspan style="fill:${palette[breakdown.parts[i]?.slot ?? 'other']};fill-opacity:${opacities[i]}">${escape(name)}</tspan>`)
           .join('')}</text>`
       : ''
 

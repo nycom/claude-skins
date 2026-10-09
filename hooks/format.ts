@@ -101,10 +101,9 @@ export function compactCount(count: number): string {
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 // When a plan limit resets, by local calendar day: the clock time today (`2:40pm`), then
-// `tmrw 9:00am`, then the weekday (`Sat 9:00am`), and from a week off, when the weekday is
-// today's or past it, `next Fri 9:00am`; so no reset reads as one already gone. From two weeks
-// off a weekday would name the wrong week, so the date (`Oct 23 9:00am`). Nothing for a
-// missing or unreadable timestamp, or one already past, as the window has since reset.
+// `tmrw 9:00am`, then the weekday (`Sat 9:00am`), and a week off, on today's weekday,
+// `next Fri 9:00am`; so no reset reads as one already gone. Nothing for a missing or
+// unreadable timestamp, or one already past, as the window has since reset.
 export function resetLabel(at: string | undefined, now: number): string | undefined {
   const date = new Date(at ?? Number.NaN)
 
@@ -117,7 +116,6 @@ export function resetLabel(at: string | undefined, now: number): string | undefi
   const today = new Date(now)
   const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
   const weekOn = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7)
-  const twoWeeksOn = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 14)
 
   if (date.toDateString() === today.toDateString()) {
     return time
@@ -125,10 +123,6 @@ export function resetLabel(at: string | undefined, now: number): string | undefi
 
   if (date.toDateString() === tomorrow.toDateString()) {
     return `tmrw ${time}`
-  }
-
-  if (date >= twoWeeksOn) {
-    return `${date.toDateString().slice(4, 7)} ${date.getDate()} ${time}`
   }
 
   return `${date >= weekOn ? 'next ' : ''}${WEEKDAYS[date.getDay()]} ${time}`

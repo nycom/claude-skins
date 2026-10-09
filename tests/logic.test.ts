@@ -16,6 +16,7 @@ import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
 import tokyoNight from '../hooks/themes/tokyo-night'
+import noir from '../hooks/themes/noir'
 
 const NAMES = ['tokyo-night', 'dracula', 'nord']
 
@@ -305,6 +306,27 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
   expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
 })
 
+test('on a skin with one colour for every part, the breakdown steps its parts down in opacity, largest first', async () => {
+  const parts = partsOf([{ name: 'Messages', tokens: 61 }, { name: 'System tools', tokens: 22 }, { name: 'System prompt', tokens: 9 }, { name: 'Memory files', tokens: 8 }])
+
+  for (const [palette, bg] of [[noir.palette, '#262624'], [forTheme(noir, true).palette, LIGHT_BG]] as const) {
+    const { source } = usageSvg([{ label: 'context', percent: 48 }], palette, [], false, { parts, isLabelled: true })
+    const opacities = [...source.matchAll(/<rect class="part" [^>]*fill-opacity="([\d.]+)"/g)].map(m => Number(m[1]))
+
+    expect(new Set(opacities.slice(0, 3)).size).toBe(3)
+    // Each name reads in its segment's tone, at 4.5:1 on the page; each segment at 3:1 on the page and its track.
+    for (const [i, [name, slot]] of ([['msgs 61%', 'user'], ['tools 22%', 'run'], ['sys 9%', 'read']] as const).entries()) {
+      const opacity = opacities[i] ?? 1
+      expect(source).toContain(`fill:${palette[slot]};fill-opacity:${opacity}">${name}`)
+      expect(contrast(over(palette[slot], opacity, bg), bg)).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(over(palette[slot], opacity, bg), over(palette.muted, TRACK_OPACITY, bg))).toBeGreaterThanOrEqual(3)
+    }
+  }
+
+  // A skin with a colour per part keeps them at full strength.
+  expect(usageSvg([{ label: 'context', percent: 48 }], tokyoNight.palette, [], false, { parts, isLabelled: true }).source).not.toMatch(/opacity(="|:)0\.[68]/)
+})
+
 test('token counts read compactly, and a reset reads as a time today, tomorrow or on a weekday', async () => {
   expect([950, 1500, 96_000, 200_000, 999_700, 1_200_000].map(compactCount)).toEqual(['950', '1.5k', '96k', '200k', '1M', '1.2M'])
 
@@ -326,10 +348,6 @@ test('token counts read compactly, and a reset reads as a time today, tomorrow o
   const fridayMorning = new Date(2026, 9, 9, 9, 30).getTime()
   expect(resetLabel(new Date(2026, 9, 16, 9, 0).toISOString(), fridayMorning)).toBe('next Fri 9:00am')
   expect(resetLabel(new Date(2026, 9, 15, 9, 0).toISOString(), fridayMorning)).toBe('Thu 9:00am')
-  // Up to 13 days off is the next week's weekday; from two weeks off a weekday names the wrong week, so a date.
-  expect(resetLabel(new Date(2026, 9, 22, 9, 0).toISOString(), fridayMorning)).toBe('next Thu 9:00am')
-  expect(resetLabel(new Date(2026, 9, 23, 9, 0).toISOString(), fridayMorning)).toBe('Oct 23 9:00am')
-  expect(resetLabel(new Date(2026, 10, 3, 9, 0).toISOString(), fridayMorning)).toBe('Nov 3 9:00am')
   // A reset already gone, seen before the next reading, names no time: the window has reset.
   expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), new Date(2026, 9, 10, 9, 0).getTime())).toBeUndefined()
   expect(resetLabel(new Date(2026, 9, 9, 11, 0).toISOString(), now)).toBeUndefined()

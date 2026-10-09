@@ -4,7 +4,7 @@ import type { Palette, Skin } from './skin'
 // the rest are derived: body text goes near-black, bands go near-white, and each colour
 // is deepened until it reads on white.
 
-const channels = (hex: string): [number, number, number] => [
+export const channels = (hex: string): [number, number, number] => [
   parseInt(hex.slice(1, 3), 16),
   parseInt(hex.slice(3, 5), 16),
   parseInt(hex.slice(5, 7), 16),

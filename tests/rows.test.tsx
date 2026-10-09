@@ -1153,14 +1153,88 @@ test('at 75% on a ~120 column terminal the rings, kept extras and the Compact co
   const columns = 120
   const { draw } = await bandWith($, on, args => fullUsage(75, args))
   const { width, hasCompact } = await draw('desktop', columns)
-  // The row's padding and gap, then the nudge and the 'Compact now' button, as the band reserves them.
-  const controls = 5 + 2 + ('Compact now'.length + 6 + 2) + ('Context is 75% full'.length + 2)
+  // The gap, then the nudge and the 'Compact now' button, as the band reserves them.
+  const controls = 2 + ('Compact now'.length + 6 + 2) + ('Context is 75% full'.length + 2)
   // A column no narrower than the cards' calibrated 6.4px, so the row fits at any code font from there up.
   const px = 6.4
 
   expect(hasCompact).toBe(true)
   expect(width).toBeGreaterThan(0)
   expect(width + controls * px).toBeLessThanOrEqual(columns * px)
+})
+
+test('the band lays out across all of bodyColumns, which already leave the engine its [-]', async ($, on) => {
+  const { draw } = await bandWith($, on, args => fullUsage(48, args))
+  const { width } = await draw('desktop')
+  // Just the room for the whole image and the gap after it.
+  const { source, text } = await draw('desktop', Math.ceil(width / 6.4) + 2)
+
+  expect(source).toContain('msgs 61%')
+  expect(text).not.toContain('paddingRight')
+})
+
+test('with the band off, a usage reading asks for no breakdown', async ($, on) => {
+  const asked: (string | undefined)[] = []
+  mock.clock(on, { now: NOON })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', ($, e) => ({ value: e.key === 'prefs' ? { skin: 'tokyo-night', band: false } : undefined }))
+  on('env.get', () => ({ value: undefined }))
+  on('config.list', () => ({ value: [] }))
+  on('session.usage', ($, e) => {
+    asked.push(e.breakdown)
+    return { value: fullUsage(48, e) as never }
+  })
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  expect(asked).toEqual([undefined])
+})
+
+test('a new session, or the band turned off, stops the band waking at midnight to relabel its reset', { timeoutMs: 30_000 }, async ($, on) => {
+  // A minute to Friday midnight, the 7d window resetting two minutes into Saturday.
+  const clock = mock.clock(on, { now: new Date(2026, 9, 9, 23, 59).getTime() })
+  const writes: string[] = []
+  on('state.set', ($, e, next) => {
+    writes.push(e.key)
+    return next(e)
+  })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('env.get', () => ({ value: undefined }))
+  on('config.list', () => ({ value: [] }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { window: 200000, percent: 40 }, rateLimits: [{ kind: 'seven_day', percentUsed: 23, resetsAt: new Date(2026, 9, 10, 0, 2).toISOString() }] },
+  }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const start = () => $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const wakes = async (ms: number) => {
+    writes.length = 0
+    await clock.advance(ms)
+    return writes.filter(key => key === 'usage').length
+  }
+
+  await start()
+  const first = await $.ui.mount(BAND('desktop', false))
+  // Its rings settle.
+  await clock.advance(1200)
+  await first.unmount()
+  await start()
+  // Past midnight.
+  expect(await wakes(90_000)).toBe(0)
+
+  const second = await $.ui.mount(BAND('desktop', false))
+  await runSkin($, 'band off')
+  expect(JSON.stringify(await second.drawn())).toContain('stock row')
+  // Past the reset.
+  expect(await wakes(120_000)).toBe(0)
+  await second.unmount()
 })
 
 test('the extras redraw as the same image at the same readings, hold still under Reduce motion', async ($, on) => {

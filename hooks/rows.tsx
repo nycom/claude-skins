@@ -573,20 +573,18 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
   const isOffered = canCompact && context >= COMPACT_SHOW
   const nudge = `Context is ${context}% full`
   const label = isNudge ? 'Compact now' : 'Compact'
-  // The padding and gap, and room for the Compact controls whenever the context is full
-  // enough for them, even while a turn hides them, so the extras hold still across turns.
-  const reserved = 5 + 2 + (context >= COMPACT_SHOW ? label.length + 6 + 2 : 0) + (isNudge ? nudge.length + 2 : 0)
+  // The gap, and room for the Compact controls whenever the context is full enough for
+  // them, even while a turn hides them, so the extras hold still across turns.
+  const reserved = 2 + (context >= COMPACT_SHOW ? label.length + 6 + 2 : 0) + (isNudge ? nudge.length + 2 : 0)
 
   return (
-    // The right edge stays clear: the band draws its own collapse mark ([-]) there.
-    <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
+    // bodyColumns already leave out the engine's collapse mark ([-]) at the right edge.
+    <Box flexDirection="row" alignItems="center" columnGap={2}>
       {meterView(look, meters, parts, columns - reserved, starts, isOffered && isNudge)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? (
         <Box flexShrink={0}>
-          <Text color={palette.warn} wrap="truncate-end">
-            {nudge}
-          </Text>
+          <Text color={palette.warn}>{nudge}</Text>
         </Box>
       ) : (
         ''
