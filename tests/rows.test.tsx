@@ -840,6 +840,77 @@ test('each surface remembers its own card draws: desktop, mobile, desktop animat
   }
 })
 
+const desktopReply = (requestId: string, text: string) =>
+  ({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId, props: { text, isFirstOfReply: true } }) as const
+const svgOf = async (ui: { find: (q: { type: string }) => Promise<unknown> }) =>
+  ((await ui.find({ type: 'Svg' })) as { props: { source: string; width: number } } | undefined)?.props ?? { source: '', width: 0 }
+// Every text a card draws, its lines joined by spaces.
+const drawnText = (source: string) => [...source.matchAll(/>([^<>]+)</g)].map(m => m[1]).join(' ')
+
+test('a desktop table card spans its columns: Copy sits under the card, not in a column of its own', async ($, on) => {
+  stubEngine(on)
+  const copied: string[] = []
+  on('ui.copy', ($, e) => (copied.push(e.text), { value: { isCopied: true } }))
+  const ui = await $.ui.mount(desktopReply('span-tb', '| Client | Where |\n| --- | --- |\n| Robot | Pi |'))
+  const { source, width } = await svgOf(ui)
+  type Node = { props?: Record<string, unknown>; children?: readonly unknown[] }
+  const overlays = (node: unknown): number =>
+    typeof node !== 'object' || node === null ? 0 : ((node as Node).props?.position === 'absolute' ? 1 : 0) + ((node as Node).children ?? []).reduce<number>((sum, child) => sum + overlays(child), 0)
+
+  // The header's rule runs the card's full width, less its padding: no slot kept free for Copy.
+  expect(source).toContain(`class="rule" x1="24" y1="57" x2="${width - 24}"`)
+  expect(overlays(await ui.find({ type: 'Box' }))).toBe(0)
+  await ui.press({ key: 'copy-0' })
+  expect(copied).toEqual(['| Client | Where |\n| --- | --- |\n| Robot | Pi |'])
+  await ui.unmount()
+})
+
+test('a desktop table card draws long headers and cells in full, wrapping instead of cutting', async ($, on) => {
+  stubEngine(on)
+  const long = 'Yes, systemd brings it back (its README says so, and the unit restarts it on failure with a five second backoff, which held when the process was killed twice and came back each time without help)'
+  const text = `| Client | Where | Survives a restart |\n| --- | --- | --- |\n| Robot | the Pi under /home/user | ${long} |\n| WEB | Cloud Run | ${long} ${long} |\n| Server | NAS | no |`
+  const ui = await $.ui.mount(desktopReply('full-tb', text))
+  const { source } = await svgOf(ui)
+  const words = drawnText(source).split(/\s+/)
+
+  expect(source).not.toContain('…')
+  for (const word of ['CLIENT', 'WHERE', 'SURVIVES', 'A', 'RESTART', ...long.split(' ')]) {
+    expect(words).toContain(word)
+  }
+  await ui.unmount()
+})
+
+test('a link in a desktop table cell is drawn as its text and pressable as a link', async ($, on) => {
+  stubEngine(on)
+  const ui = await $.ui.mount(desktopReply('link-tb', '| Client | Docs |\n| --- | --- |\n| Robot | see [README](https://github.com/nycom/orion#readme) first |'))
+  const { source } = await svgOf(ui)
+  const link = (await ui.find({ type: 'Link' })) as { props: { href: string; label?: string } } | undefined
+
+  expect(link?.props).toEqual({ href: 'https://github.com/nycom/orion#readme', label: 'README' })
+  expect(source).not.toContain('](')
+  expect(source).toContain('class="link">README</tspan>')
+  await ui.unmount()
+})
+
+test('a table scrolled back into view does not rise in again, whatever request draws it', async ($, on) => {
+  const clock = stubEngine(on)
+  const text = '| Client | Where |\n| --- | --- |\n| Robot | Pi |\n| Server | NAS |'
+  const held = '*{animation:none!important}</style>'
+
+  // The engine keeps a drawing's answer and replays it when the row mounts again: once its
+  // rows have risen, the answer it keeps must be the still one.
+  const first = await $.ui.mount(desktopReply('scroll-a', text))
+  expect((await svgOf(first)).source).not.toContain(held)
+  await clock.advance(1500)
+  expect((await svgOf(first)).source).toContain(held)
+  await first.unmount()
+
+  // A mount under a new request id draws the same table, already seen, still.
+  const again = await $.ui.mount(desktopReply('scroll-b', text))
+  expect((await svgOf(again)).source).toContain(held)
+  await again.unmount()
+})
+
 test('when the context ring moves, a weekly ring that did not move stays full instead of replaying', async ($, on) => {
   mock.clock(on)
   let percent = 40

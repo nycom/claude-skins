@@ -70,6 +70,7 @@ declare module 'claude-code' {
       usage: UsageSnap
       isLight: boolean
       images: StateFamily<boolean>
+      settled: StateFamily<number>
       compacting: boolean
       pinned: boolean
       theme: PanelTheme | null

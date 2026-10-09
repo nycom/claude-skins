@@ -56,6 +56,7 @@ const usageAtom = atom({ plugin: 'skins', key: 'usage' } as const, { context: nu
 const compactingAtom = atom({ plugin: 'skins', key: 'compacting' } as const, false)
 const pinnedAtom = atom({ plugin: 'skins', key: 'pinned' } as const, false)
 const themeAtom = atom({ plugin: 'skins', key: 'theme' } as const, null as PanelTheme | null)
+const settledAtom = atom({ plugin: 'skins', key: 'settled' } as const, 0)
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 
@@ -161,11 +162,23 @@ const redraw = (key: string | undefined): boolean => {
 // only gained rows, as one does while its reply streams, lets the new rows rise in.
 // ponytail: keeps every reply with a table for the session; a reload clears it.
 const shown = new Map<string, readonly Segment[]>()
-const freshRows = (key: string | undefined, segments: readonly Segment[]): (number | undefined)[] | undefined => {
+// The cards each surface has drawn, by what they hold: a reply mounted again under a new
+// request, as one scrolled back into view may be, draws cards it has shown still.
+// ponytail: one entry per card shown for the session; a reload clears it.
+const seenCards = new Set<string>()
+const cardsOf = (surface: RenderSurface, segments: readonly Segment[]): string[] =>
+  segments.filter(segment => segment.kind !== 'text').map(segment => `${surface}:${JSON.stringify(segment)}`)
+const freshRows = (e: { surface: RenderSurface; requestId?: string | undefined }, segments: readonly Segment[]): (number | undefined)[] | undefined => {
+  const key = drawKey(e)
   if (key === undefined) return undefined
   const last = shown.get(key)
   shown.set(key, segments)
-  if (last === undefined) return undefined
+  // A streaming reply's earlier draws are not cards anyone scrolls back to.
+  for (const card of cardsOf(e.surface, last ?? [])) seenCards.delete(card)
+  const cards = cardsOf(e.surface, segments)
+  const isSeen = cards.every(card => seenCards.has(card))
+  for (const card of cards) seenCards.add(card)
+  if (last === undefined) return isSeen ? [] : undefined
 
   // A table is matched to the one at its own place among the reply's tables, so text or code
   // arriving ahead of it, which moves it to a later segment, does not make it new.
@@ -185,6 +198,22 @@ const freshRows = (key: string | undefined, segments: readonly Segment[]): (numb
 // more draw settles them.
 const ramp = rampFrom()
 let settle: { cancel(): void } | undefined
+
+// The engine keeps a reply's drawing and shows it again when the reply's row mounts again,
+// as on a scroll back into view, which plays its animation again. So once its rows have
+// risen, the reply is drawn once more, still, and that is the drawing kept.
+const replySettles = new Map<string, { cancel(): void }>()
+function settleReply($: EngineInterface, e: { surface: RenderSurface; requestId: string }): void {
+  const key = `${e.surface}:${e.requestId}`
+  replySettles.get(key)?.cancel()
+  replySettles.set(
+    key,
+    $.clock.after(SETTLE_MS, () => {
+      replySettles.delete(key)
+      return update($, memberOf(settledAtom, e), n => n + 1)
+    }),
+  )
+}
 
 // What the settings said when last read.
 type ConfigMemo = Awaited<ReturnType<typeof refreshTheme>>
@@ -636,7 +665,12 @@ reply width: ${lastColumns} columns`
 
     const svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
     // Only a vector card animates, so only its draws are remembered.
-    const fresh = svg === undefined ? undefined : freshRows(drawKey(e), segments)
+    const fresh = svg === undefined ? undefined : freshRows(e, segments)
+
+    if (svg !== undefined) {
+      await read($, memberOf(settledAtom, e))
+      if (fresh === undefined || fresh.some(row => row !== undefined)) settleReply($, e)
+    }
 
     return drawOnce(fresh !== undefined, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg, fresh))
   })

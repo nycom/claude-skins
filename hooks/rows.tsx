@@ -2,7 +2,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, TurnStats } from '../types'
 import { formatDuration, formatMs } from './format'
-import { columnWidths, cutCell, widthOf } from './markdown'
+import { columnWidths, cutCell, LINK, widthOf } from './markdown'
 import type { Segment, Table } from './markdown'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
@@ -18,7 +18,7 @@ import { COMPACT_NUDGE, COMPACT_SHOW, partCells, partNames, usageLine, usageSvg 
 import type { Breakdown, Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
-export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button'>
+export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button' | 'Link'>
 
 // The vector element, on the surfaces that have one (the desktop app).
 export type SvgElement = ElementTable<'desktop'>['Svg']
@@ -336,17 +336,34 @@ function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt:
   )
 }
 
+// A table card with its links and Copy button under it, not over it: the card's header is
+// its columns' labels, with no corner to spare. The image cannot be pressed, so its links
+// are pressed here.
 function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string, fresh?: number) {
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined, fresh)
+  const { Box, Link } = look.ui
+  const card = tableSvg(table, look.skin.palette, cardWidth(columns), fresh)
+  const links = new Map(table.rows.flat().flatMap(cell => [...cell.matchAll(LINK)].map(([, label = '', href = '']) => [href, label] as const)))
 
-  return cardWithCopy(look, Svg, card, key, tableMarkdown(table), 'Copy table')
+  return (
+    <Box flexDirection="column" marginY={1} alignSelf="flex-start">
+      <Svg source={card.source} alt={card.alt} width={card.width} height={card.height} />
+      <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+          {[...links].map(([href, label]) => (
+            <Link href={href} label={label} />
+          ))}
+        </Box>
+        {copyButton(look, key, tableMarkdown(table)) ?? ''}
+      </Box>
+    </Box>
+  )
 }
 
 // A table as markdown again, for the clipboard.
 const tableMarkdown = (table: Table): string =>
   [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
 
-// A Copy button padded to sit on a border line; nothing where nothing can copy.
+// A table's Copy button; nothing where nothing can copy.
 function copyButton(look: Look, key: string, text: string) {
   const { Button } = look.ui
   const copy = look.copy

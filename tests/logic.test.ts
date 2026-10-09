@@ -437,10 +437,10 @@ test('a plan ring is a still jog ring until 80%, then chases in the warning colo
   expect(both).toContain('@keyframes jog1{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
 })
 
-test('a long cell wraps on its words, breaks a word too long for the column, and caps its lines', async () => {
+test('a long cell wraps on its words, breaks a word too long for the column, and keeps every word', async () => {
   expect(wrapCell('the quick brown fox jumps', 90, false)).toEqual(['the quick', 'brown fox', 'jumps'])
   expect(wrapCell('x'.repeat(30), 60, true).every(line => measure(line, true) <= 60)).toBe(true)
-  expect(wrapCell('word '.repeat(80), 60, false, 2).at(-1)).toMatch(/…$/)
+  expect(wrapCell('word '.repeat(80), 60, false).join(' ')).toBe('word '.repeat(80).trim())
 })
 
 test('short columns keep their width and long ones share the rest', async () => {

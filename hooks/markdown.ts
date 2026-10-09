@@ -10,6 +10,9 @@ export type Code = { kind: 'code'; lang: string; code: string; raw: string }
 
 export type Segment = { kind: 'text'; text: string } | Table | Code
 
+// A markdown link, `[text](href)`.
+export const LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g
+
 const SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
 const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)/
 

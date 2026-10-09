@@ -1,6 +1,7 @@
+import { LINK } from './markdown'
 import type { Align, Table } from './markdown'
 import type { Palette } from './skin'
-import { CONTROL_SLOT, escape, HEADER_MID, measure as measureAt, MONO, staggerMs, svgCard } from './svg-kit'
+import { escape, measure as measureAt, MONO, staggerMs, svgCard } from './svg-kit'
 
 // A table as an animated vector card in the skin's colours, with no background of its
 // own so the page shows through, for the surfaces that draw `Svg` (the desktop app).
@@ -10,9 +11,11 @@ import { CONTROL_SLOT, escape, HEADER_MID, measure as measureAt, MONO, staggerMs
 const SIZE = 15
 const LINE_H = 21
 const HEADER_H = 58
+const HEAD_LINE_H = 16
+// The header's 12px capitals with their .1em letter spacing measure about as 14px text.
+const HEAD_MEASURE = 14
 const ROW_PAD_Y = 12
 const MIN_ROW_H = 44
-const MAX_CELL_LINES = 6
 const PAD_X = 24
 const COL_GAP = 28
 const MIN_COL = 56
@@ -47,18 +50,23 @@ export const kindOfCell = (cell: string): CellKind => {
   return CODE.test(text) && text.length > 1 ? 'code' : 'text'
 }
 
-// Width of a string in pixels at the table's type size.
-export const measure = (text: string, isMono: boolean): number => measureAt(text, isMono, SIZE)
+// A link's text is drawn between these marks, which take no room, and styled as a link.
+const OPEN = '\u0001'
+const CLOSE = '\u0002'
+const showLinks = (cell: string): string => cell.replace(LINK, `${OPEN}$1${CLOSE}`)
+
+// Width of a string in pixels, at the table's type size unless told another.
+export const measure = (text: string, isMono: boolean, size = SIZE): number => measureAt(text.replace(/[\u0001\u0002]/g, ''), isMono, size)
 
 const isMonoKind = (kind: CellKind): boolean => kind !== 'text'
 
 // Splits a word too long for its column into pieces that each fit.
-function breakWord(word: string, width: number, isMono: boolean): string[] {
+function breakWord(word: string, width: number, isMono: boolean, size: number): string[] {
   const pieces: string[] = []
   let piece = ''
 
   for (const char of word) {
-    if (piece !== '' && measure(piece + char, isMono) > width) {
+    if (piece !== '' && measure(piece + char, isMono, size) > width) {
       pieces.push(piece)
       piece = char
     } else {
@@ -69,15 +77,15 @@ function breakWord(word: string, width: number, isMono: boolean): string[] {
   return piece === '' ? pieces : [...pieces, piece]
 }
 
-// The cell's text as lines that fit its column; past the cap, the last line ends in `…`.
-export function wrapCell(text: string, width: number, isMono: boolean, maxLines = MAX_CELL_LINES): string[] {
+// The cell's text as lines that fit its column, all of it: nothing is cut.
+export function wrapCell(text: string, width: number, isMono: boolean, size = SIZE): string[] {
   const lines: string[] = []
   let line = ''
 
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const candidate = line === '' ? word : `${line} ${word}`
 
-    if (measure(candidate, isMono) <= width) {
+    if (measure(candidate, isMono, size) <= width) {
       line = candidate
       continue
     }
@@ -86,33 +94,21 @@ export function wrapCell(text: string, width: number, isMono: boolean, maxLines 
       lines.push(line)
     }
 
-    const pieces = measure(word, isMono) <= width ? [word] : breakWord(word, width, isMono)
+    const pieces = measure(word, isMono, size) <= width ? [word] : breakWord(word, width, isMono, size)
     lines.push(...pieces.slice(0, -1))
     line = pieces.at(-1) ?? ''
   }
 
   const all = line === '' ? lines : [...lines, line]
 
-  if (all.length <= maxLines) {
-    return all.length === 0 ? [''] : all
-  }
-
-  const kept = all.slice(0, maxLines)
-  const last = kept[maxLines - 1] ?? ''
-  const chars = [...last]
-
-  while (chars.length > 0 && measure(`${chars.join('')}…`, isMono) > width) {
-    chars.pop()
-  }
-
-  return [...kept.slice(0, -1), `${chars.join('')}…`]
+  return all.length === 0 ? [''] : all
 }
 
 function naturalWidths(table: Table): number[] {
   return table.header.map((header, col) => {
     const cells = table.rows.map(row => row[col] ?? '')
     const widest = Math.max(
-      measure(header.toUpperCase(), false) * 0.85,
+      measure(header.toUpperCase(), false, HEAD_MEASURE),
       ...cells.map(cell => measure(cell, isMonoKind(kindOfCell(cell))) + (kindOfCell(cell) === 'colour' ? 22 : 0)),
     )
 
@@ -123,8 +119,8 @@ function naturalWidths(table: Table): number[] {
 // Columns that fit their fair share keep their natural width; the rest share what is
 // left in proportion to how much they hold, and wrap. With room to spare, every column
 // stretches in proportion, so the card spans its width.
-export function fitColumns(natural: readonly number[], width: number, reserve = 0): number[] {
-  const room = width - PAD_X * 2 - reserve - COL_GAP * (natural.length - 1)
+export function fitColumns(natural: readonly number[], width: number): number[] {
+  const room = width - PAD_X * 2 - COL_GAP * (natural.length - 1)
   const total = natural.reduce((sum, w) => sum + w, 0)
 
   if (total <= room) {
@@ -172,36 +168,47 @@ function cellMarkup(cell: Cell, left: number, width: number, align: Align, rowH:
     return `<text x="${xOf(left, width, align)}" y="${middle + 5}" text-anchor="${anchorOf(align)}" ${font}><tspan fill="${palette.ok}">+${added}</tspan><tspan fill="${palette.muted}"> </tspan><tspan fill="${palette.err}">−${removed}</tspan></text>`
   }
 
+  // A link's text may wrap: each line closes the link it leaves open and the next reopens it.
+  let isInLink = false
+
   return cell.lines
-    .map(
-      (line, i) =>
-        `<text x="${xOf(left, width, align)}" y="${firstY + i * LINE_H}" text-anchor="${anchorOf(align)}" ${font} fill="${palette.fg}" class="${cell.kind === 'number' ? 'num' : ''}">${escape(line)}</text>`,
-    )
+    .map((line, i) => {
+      const reopen = isInLink ? '<tspan class="link">' : ''
+      isInLink = line.lastIndexOf(OPEN) > line.lastIndexOf(CLOSE) || (isInLink && !line.includes(CLOSE))
+      const shown = escape(line).replaceAll(OPEN, '<tspan class="link">').replaceAll(CLOSE, '</tspan>')
+
+      return `<text x="${xOf(left, width, align)}" y="${firstY + i * LINE_H}" text-anchor="${anchorOf(align)}" ${font} fill="${palette.fg}" class="${cell.kind === 'number' ? 'num' : ''}">${reopen}${shown}${isInLink ? '</tspan>' : ''}</text>`
+    })
     .join('')
 }
 
 // `width` is the room the reply gives the card, in pixels; it is clamped to a sane range.
-// `hasControl` keeps a gutter at the right for a Copy button laid over the header.
 // `fresh` is the first row new since the card's last draw: on a redraw only rows from it
 // on rise in, their stagger starting at once.
-export function tableSvg(table: Table, palette: Palette, width: number, hasControl = false, fresh?: number): SvgTable {
+export function tableSvg(table: Table, palette: Palette, width: number, fresh?: number): SvgTable {
   const cardWidth = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)))
-  const reserve = hasControl ? CONTROL_SLOT : 0
-  const widths = fitColumns(naturalWidths(table), cardWidth, reserve)
+  const shownRows = table.rows.map(row => row.map(showLinks))
+  const widths = fitColumns(naturalWidths({ ...table, rows: shownRows }), cardWidth)
   const lefts = widths.map((_, i) => PAD_X + widths.slice(0, i).reduce((sum, w) => sum + w + COL_GAP, 0))
   const align = (i: number): Align => table.align[i] ?? 'left'
 
-  const laid = table.rows.map(row => row.map((cell, i) => layoutCell(cell, (widths[i] ?? MIN_COL) - (kindOfCell(cell) === 'colour' ? 22 : 0))))
+  const laid = shownRows.map(row => row.map((cell, i) => layoutCell(cell, (widths[i] ?? MIN_COL) - (kindOfCell(cell) === 'colour' ? 22 : 0))))
   const heights = laid.map(cells => Math.max(MIN_ROW_H, Math.max(...cells.map(cell => cell.lines.length)) * LINE_H + ROW_PAD_Y * 2))
-  const tops = heights.map((_, r) => HEADER_H + heights.slice(0, r).reduce((sum, h) => sum + h, 0))
-  const height = HEADER_H + heights.reduce((sum, h) => sum + h, 0) + 6
+  // A header too long for its column wraps, and the header grows to hold it.
+  const heads = table.header.map((cell, i) => wrapCell(cell.toUpperCase(), widths[i] ?? MIN_COL, false, HEAD_MEASURE))
+  const headerH = HEADER_H + (Math.max(...heads.map(lines => lines.length)) - 1) * HEAD_LINE_H
+  const tops = heights.map((_, r) => headerH + heights.slice(0, r).reduce((sum, h) => sum + h, 0))
+  const height = headerH + heights.reduce((sum, h) => sum + h, 0) + 6
 
-  const header = table.header
-    .map((cell, i) => {
-      const [text = ''] = wrapCell(cell.toUpperCase(), widths[i] ?? MIN_COL, false, 1)
-
-      return `<text x="${xOf(lefts[i] ?? 0, widths[i] ?? 0, align(i))}" y="${HEADER_MID + 4}" text-anchor="${anchorOf(align(i))}" class="head">${escape(text)}</text>`
-    })
+  const header = heads
+    .map((lines, i) =>
+      lines
+        .map(
+          (text, l) =>
+            `<text x="${xOf(lefts[i] ?? 0, widths[i] ?? 0, align(i))}" y="${headerH / 2 + 4 + (l - (lines.length - 1) / 2) * HEAD_LINE_H}" text-anchor="${anchorOf(align(i))}" class="head">${escape(text)}</text>`,
+        )
+        .join(''),
+    )
     .join('')
 
   const rows = laid
@@ -220,6 +227,7 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
     `text{font-size:${SIZE}px}`,
     `.head{font-size:12px;font-weight:600;letter-spacing:.1em;fill:${palette.muted}}`,
     `.num{font-variant-numeric:tabular-nums}`,
+    `.link{fill:${palette.web};text-decoration:underline}`,
     // Visible by default: `both` hides a row or the rule only while its delay runs.
     `.row{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}`,
     `.rule{stroke-dasharray:${cardWidth};animation:draw .8s cubic-bezier(.6,0,.2,1) .05s both}`,
@@ -229,7 +237,7 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
 
   const body = [
     header,
-    `<line class="rule" x1="${PAD_X}" y1="${HEADER_H - 1}" x2="${cardWidth - PAD_X - reserve}" y2="${HEADER_H - 1}" stroke="${palette.user}" stroke-width="1" stroke-linecap="square"/>`,
+    `<line class="rule" x1="${PAD_X}" y1="${headerH - 1}" x2="${cardWidth - PAD_X}" y2="${headerH - 1}" stroke="${palette.user}" stroke-width="1" stroke-linecap="square"/>`,
     rows,
   ].join('')
 
