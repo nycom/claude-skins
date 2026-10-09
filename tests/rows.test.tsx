@@ -764,6 +764,23 @@ test('a reply whose table gives its place to text on a redraw still draws', asyn
   await swapped.unmount()
 })
 
+test('a table that moves to another segment keeps its rows held; only the new row rises in', async ($, on) => {
+  stubEngine(on)
+  const reply = (text: string) => ({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'shift-tb', props: { text } as never }) as const
+  const table = (rows: string[]) => ['| A | B |', '| --- | --- |', ...rows].join('\n')
+  const draw = async (text: string) => {
+    const ui = await $.ui.mount(reply(text))
+    const source = ((await ui.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    await ui.unmount()
+    return [...source.matchAll(/<g class="(row[^"]*)" style="animation-delay:\d+ms">(.*?)<\/g><\/g>/g)].map(([, cls, body]) => [cls, [...(body ?? '').matchAll(/>([^<]+)<\/text>/g)].map(m => m[1]).join(' ')])
+  }
+
+  // A closed code block sits before the table, then goes: the table moves from segment 2 to segment 1.
+  await draw(`Intro\n\n\`\`\`js\nx\n\`\`\`\n\n${table(['| 1 | 2 |', '| 3 | 4 |'])}`)
+  const grown = await draw(`Intro\n\n${table(['| 1 | 2 |', '| 3 | 4 |', '| 5 | 6 |'])}`)
+  expect(grown.filter(([cls]) => cls === 'row fresh')).toEqual([['row fresh', '5 6']])
+})
+
 test('the terminal drawing a reply first does not hold the desktop’s first draw still', async ($, on) => {
   stubEngine(on)
   const reply = (surface: (typeof SURFACES)[number]) =>
@@ -775,6 +792,27 @@ test('the terminal drawing a reply first does not hold the desktop’s first dra
   expect(source).toContain('<svg')
   expect(source).not.toContain('*{animation:none!important}</style>')
   await desktop.unmount()
+})
+
+test('each surface remembers its own card draws: desktop, mobile, desktop animates, animates, holds', async ($, on) => {
+  stubEngine(on)
+  const sourceOf = async (ui: { find: (q: { type: string }) => Promise<unknown> }) =>
+    ((await ui.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+  const held = '*{animation:none!important}</style>'
+  const shell = (surface: 'desktop' | 'mobile') =>
+    ({ ...SITE, surface, component: 'ToolResult', requestId: 'surf-sh', props: { tool_use_id: 'surf-sh', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false } }) as const
+  const table = (surface: 'desktop' | 'mobile') =>
+    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'surf-tb', props: { text: '| A | B |\n| --- | --- |\n| 1 | 2 |' } as never }) as const
+
+  for (const make of [shell, table]) {
+    const states: boolean[] = []
+    for (const surface of ['desktop', 'mobile', 'desktop'] as const) {
+      const ui = await $.ui.mount(make(surface))
+      states.push((await sourceOf(ui)).includes(held))
+      await ui.unmount()
+    }
+    expect(states).toEqual([false, false, true])
+  }
 })
 
 test('when the context ring moves, a weekly ring that did not move stays full instead of replaying', async ($, on) => {

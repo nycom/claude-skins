@@ -141,9 +141,13 @@ const freshRows = (key: string | undefined, segments: readonly Segment[]): (numb
   shown.set(key, segments)
   if (last === undefined) return undefined
 
-  return segments.map((segment, i) => {
+  // A table is matched to the one at its own place among the reply's tables, so text or code
+  // arriving ahead of it, which moves it to a later segment, does not make it new.
+  const priorTables = last.filter(segment => segment.kind === 'table')
+  let nth = 0
+  return segments.map(segment => {
     if (segment.kind !== 'table') return undefined
-    const prior = last[i]
+    const prior = priorTables[nth++]
     const before = prior?.kind === 'table' ? prior.rows : []
     // The last row may have been drawn half-written and finished since, so it may differ.
     const kept = before.slice(0, -1).every((row, r) => row.join('\n') === segment.rows[r]?.join('\n'))
