@@ -8,7 +8,7 @@ import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
 import { codeSvg } from './svg-code'
-import { diffSvg } from './svg-diff'
+import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
 import { cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
@@ -61,18 +61,18 @@ const CELL_PAD = 1
 // The worst thing that happened to any of the calls, else how far along they are.
 function status({ skin, icons }: Look, calls: readonly Call[]) {
   if (calls.some(call => call.isInterrupted)) {
-    return { glyph: icons.interrupted, color: skin.palette.warn }
+    return { glyph: icons.interrupted, color: skin.palette.warn, word: 'interrupted', mark: 'interrupted' as const }
   }
 
   if (calls.some(call => call.isErrored)) {
-    return { glyph: icons.err, color: skin.palette.err }
+    return { glyph: icons.err, color: skin.palette.err, word: 'failed', mark: 'failed' as const }
   }
 
   if (calls.some(call => call.isRunning)) {
-    return { glyph: icons.running, color: skin.palette.muted }
+    return { glyph: icons.running, color: skin.palette.muted, word: 'running' }
   }
 
-  return { glyph: icons.ok, color: skin.palette.ok }
+  return { glyph: icons.ok, color: skin.palette.ok, word: 'done' }
 }
 
 // The connector above a node, which ties a turn's calls into one line down the left.
@@ -159,14 +159,15 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
 }
 
 // On a surface with vector icons, the icon leads the row in place of the status glyph.
+// Its shape names the kind; a failed or interrupted call adds a mark, and the alt says it.
 function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>) {
   const { Box } = look.ui
-  const { color } = status(look, calls)
-  const source = toolIcon(kind, color, calls.some(call => call.isRunning))
+  const { color, word, mark } = status(look, calls)
+  const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark)
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={source} alt={kind} width={16} height={16} />
+      <Svg source={source} alt={`${KIND_LABEL[kind]}, ${word}`} width={16} height={16} />
       {line}
     </Box>
   )
@@ -317,7 +318,7 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
 // A card drawn as an image, with its Copy button laid over the top-right corner the card
 // left free. The image cannot be pressed, so the button is a real one on top of it; the
 // box hugs the image so the corner is the card's, not the column's.
-function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string) {
+function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string, label: string) {
   const { Box, Button } = look.ui
   const copy = look.copy
 
@@ -328,17 +329,17 @@ function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt:
         ''
       ) : (
         <Box position="absolute" top={1} right={3}>
-          <Button key={key} label="Copy" plain dimColor onPress={() => copy(text)} />
+          <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
         </Box>
       )}
     </Box>
   )
 }
 
-function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string) {
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string, fresh?: number) {
+  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined, fresh)
 
-  return cardWithCopy(look, Svg, card, key, tableMarkdown(table))
+  return cardWithCopy(look, Svg, card, key, tableMarkdown(table), 'Copy table')
 }
 
 // A table as markdown again, for the clipboard.
@@ -350,11 +351,11 @@ function copyButton(look: Look, key: string, text: string) {
   const { Button } = look.ui
   const copy = look.copy
 
-  return copy === undefined ? undefined : <Button key={key} label=" Copy " plain dimColor onPress={() => copy(text)} />
+  return copy === undefined ? undefined : <Button key={key} label="Copy table" plain dimColor onPress={() => copy(text)} />
 }
 
 // A small Copy button under a card or block, flush right; nothing where nothing can copy.
-export function copyRow(look: Look, key: string, text: string) {
+export function copyRow(look: Look, key: string, text: string, label = 'Copy code') {
   const { Box, Button } = look.ui
   const copy = look.copy
 
@@ -364,12 +365,13 @@ export function copyRow(look: Look, key: string, text: string) {
 
   return (
     <Box flexDirection="row" justifyContent="flex-end">
-      <Button key={key} label="Copy" plain dimColor onPress={() => copy(text)} />
+      <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
     </Box>
   )
 }
 
-export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement) {
+// `fresh` holds, per segment, the first table row new since the reply's last draw.
+export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, fresh: readonly (number | undefined)[] = []) {
   const { Box, Markdown } = look.ui
 
   return (
@@ -393,7 +395,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
         return Svg === undefined ? (
           tableRows(look, segment, maxWidth, copyButton(look, `copy-${i}`, tableMarkdown(segment)))
         ) : (
-          tableCard(look, segment, Svg, maxWidth, `copy-${i}`)
+          tableCard(look, segment, Svg, maxWidth, `copy-${i}`, fresh[i])
         )
       })}
     </Box>
@@ -472,44 +474,40 @@ export function askBand(look: Look, headers: readonly string[]) {
   )
 }
 
-// A vector card in a reply or under a tool row, a line's breath above and below it.
-function card(look: Look, Svg: SvgElement, built: { source: string; alt: string }) {
-  const { Box } = look.ui
-
-  return (
-    <Box marginY={1}>
-      <Svg source={built.source} alt={built.alt} />
-    </Box>
-  )
-}
-
 export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code') {
-  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code)
+  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code, 'Copy code')
 }
 
+// The card shows the first lines; Copy gives the whole patch.
 export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPath: string, columns: number) {
-  return card(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns)))
+  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input, shownPath), 'Copy diff')
 }
 
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number) {
   const text = [output.stdout, output.stderr].filter(part => part.trim() !== '').join('\n')
   const withCopy = text === '' ? { ...look, copy: undefined } : look
 
-  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text)
+  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text, 'Copy output')
 }
+
+// From this full, the band offers Compact; below it the button stays hidden.
+export const COMPACT_SHOW = 50
 
 // From this full, the band suggests compacting and makes it the main action.
 export const COMPACT_NUDGE = 70
 
-export const COMPACT_HOTKEY = '0'
+// A letter, which presses only while the band holds the focus (ctrl+x tab), never from
+// the prompt: Compact cannot be undone, so typing cannot set it off. The terminal shows it
+// (`c: Compact`); the desktop's button is pressed with the pointer.
+export const COMPACT_HOTKEY = 'c'
 
-function meterView(look: Look, meters: readonly Meter[]) {
+function meterView(look: Look, meters: readonly Meter[], starts: readonly number[] = [], isPulsing = false) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
   if (look.svg !== undefined) {
     const Svg = look.svg
-    const built = usageSvg(meters, palette)
+    const built = usageSvg(meters, palette, starts, isPulsing)
 
     return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
   }
@@ -526,27 +524,26 @@ function meterView(look: Look, meters: readonly Meter[]) {
   )
 }
 
-// The band above the prompt: the meters, and a Compact button that becomes the main
-// action, with a word on why, once the context is full enough to be worth it.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void) {
+// The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
+// the main action, with a word on why, once the context is full enough to be worth it.
+export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, starts: readonly number[] = []) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
   const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
   const isNudge = context >= COMPACT_NUDGE
+  const isOffered = canCompact && context >= COMPACT_SHOW
 
   return (
     // The right edge stays clear: the band draws its own collapse mark ([-]) there.
     <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      {meterView(look, meters)}
+      {meterView(look, meters, starts, isOffered && isNudge)}
       <Box flexGrow={1} />
-      {canCompact && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
-      {canCompact ? (
-        // A digit hotkey: typed alone into an empty prompt it presses the band's button, which
-        // is the only way in where the terminal reports no clicks. `plain` shows it: `0: Compact`.
+      {isOffered && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
+      {isOffered ? (
         <Button
           key="compact"
           label={isNudge ? 'Compact now' : 'Compact'}
-          hotkey={COMPACT_HOTKEY}
+          {...(look.surface === 'terminal' ? { hotkey: COMPACT_HOTKEY } : {})}
           plain
           {...(isNudge ? { variant: 'primary' as const } : { dimColor: true })}
           onPress={compact}

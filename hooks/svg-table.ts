@@ -1,6 +1,6 @@
 import type { Align, Table } from './markdown'
 import type { Palette } from './skin'
-import { CONTROL_SLOT, escape, HEADER_MID, measure as measureAt, MONO, svgCard } from './svg-kit'
+import { CONTROL_SLOT, escape, HEADER_MID, measure as measureAt, MONO, staggerMs, svgCard } from './svg-kit'
 
 // A table as an animated vector card in the skin's colours, with no background of its
 // own so the page shows through, for the surfaces that draw `Svg` (the desktop app).
@@ -182,7 +182,9 @@ function cellMarkup(cell: Cell, left: number, width: number, align: Align, rowH:
 
 // `width` is the room the reply gives the card, in pixels; it is clamped to a sane range.
 // `hasControl` keeps a gutter at the right for a Copy button laid over the header.
-export function tableSvg(table: Table, palette: Palette, width: number, hasControl = false): SvgTable {
+// `fresh` is the first row new since the card's last draw: on a redraw only rows from it
+// on rise in, their stagger starting at once.
+export function tableSvg(table: Table, palette: Palette, width: number, hasControl = false, fresh?: number): SvgTable {
   const cardWidth = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)))
   const reserve = hasControl ? CONTROL_SLOT : 0
   const widths = fitColumns(naturalWidths(table), cardWidth, reserve)
@@ -207,9 +209,10 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
       const rowH = heights[r] ?? MIN_ROW_H
       const markup = cells.map((cell, i) => cellMarkup(cell, lefts[i] ?? 0, widths[i] ?? 0, align(i), rowH, palette)).join('')
       const band = r % 2 === 1 ? `fill="${palette.fg}" fill-opacity=".05"` : 'fill="none"'
+      const isFresh = fresh !== undefined && r >= fresh
 
       // The outer group places the row; the inner one rises relative to that place.
-      return `<g transform="translate(0 ${tops[r] ?? 0})"><g class="row" style="animation-delay:${120 + r * STAGGER_MS}ms"><rect class="bg" x="0" y="0" width="${cardWidth}" height="${rowH}" ${band}/>${markup}</g></g>`
+      return `<g transform="translate(0 ${tops[r] ?? 0})"><g class="${isFresh ? 'row fresh' : 'row'}" style="animation-delay:${120 + staggerMs(isFresh ? r - fresh : r, STAGGER_MS)}ms"><rect class="bg" x="0" y="0" width="${cardWidth}" height="${rowH}" ${band}/>${markup}</g></g>`
     })
     .join('')
 
@@ -217,11 +220,11 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
     `text{font-size:${SIZE}px}`,
     `.head{font-size:12px;font-weight:600;letter-spacing:.1em;fill:${palette.muted}}`,
     `.num{font-variant-numeric:tabular-nums}`,
-    `.row{opacity:0;animation:rise .5s cubic-bezier(.2,.8,.2,1) forwards}`,
-    `.rule{stroke-dasharray:${cardWidth};stroke-dashoffset:${cardWidth};animation:draw .8s cubic-bezier(.6,0,.2,1) .05s forwards}`,
+    // Visible by default: `both` hides a row or the rule only while its delay runs.
+    `.row{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}`,
+    `.rule{stroke-dasharray:${cardWidth};animation:draw .8s cubic-bezier(.6,0,.2,1) .05s both}`,
     `@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1}}`,
-    `@keyframes draw{to{stroke-dashoffset:0}}`,
-    `@media (prefers-reduced-motion:reduce){.row,.rule{animation:none;opacity:1;stroke-dashoffset:0}}`,
+    `@keyframes draw{from{stroke-dashoffset:${cardWidth}}to{stroke-dashoffset:0}}`,
   ].join('')
 
   const body = [
@@ -231,7 +234,7 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
   ].join('')
 
   return {
-    source: svgCard(cardWidth, height, palette, style, body),
+    source: svgCard(cardWidth, height, palette, style, body, fresh === undefined ? undefined : '.fresh'),
     width: cardWidth,
     height,
     alt: [table.header.join(' | '), ...table.rows.map(row => row.join(' | '))].join('\n'),

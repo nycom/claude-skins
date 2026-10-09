@@ -10,6 +10,7 @@ import { DESIGN_TOOL, runDesign } from './designer'
 import type { DesignState } from './designer'
 import { clipLines, diffstat, pick } from './format'
 import { splitReply } from './markdown'
+import type { Segment } from './markdown'
 import { askBand, desktopSpinnerRow, diffCard, footerRow, terminalCard, usageBand, groupRow, promptRow, replyRows, spinnerRow, toolRow } from './rows'
 import type { Look, SvgElement, Ui } from './rows'
 import { galleryPane } from './gallery'
@@ -18,8 +19,9 @@ import { ICONS } from './skin'
 import type { Skin } from './skin'
 import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
-import { limitLabel, metersOf } from './svg-usage'
+import { limitLabel, metersOf, rampFrom, SETTLE_MS } from './svg-usage'
 import { shortenPath } from './format'
+import { drawOnce, holdStill } from './svg-kit'
 import { kindOf, summarize } from './tools'
 
 const SETTINGS = 'skins-settings'
@@ -36,6 +38,10 @@ const CLIP_HEAD = 8
 const CLIP_TAIL = 4
 const FRAME_MS = 90
 const KEPT_TURNS = 40
+// ponytail: an `auto` theme asks the system again this often (drawing cannot write state,
+// so a timer does it), so a mid-session appearance flip shows within a minute; a watcher
+// on the OS's appearance notification would make it instant.
+const THEME_TTL_MS = 60_000
 
 const prefsAtom = atom({ plugin: 'skins', key: 'prefs' } as const, DEFAULT_PREFS)
 const customAtom = atom({ plugin: 'skins', key: 'custom' } as const, {})
@@ -91,7 +97,9 @@ async function systemDark($: EngineInterface): Promise<boolean | undefined> {
 
 // Claude Code's own theme decides whether skins draw for a light or a dark background:
 // `SKINS_THEME` first, then the theme setting, and for `auto` the terminal and the system.
-async function refreshTheme($: EngineInterface): Promise<void> {
+// Says whether the system decided, so it is asked again later, and whether Claude Code's
+// Reduce motion setting is on.
+async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolean; reducesMotion: boolean }> {
   const rows = await $.config.list()
   const hints = {
     override: await $.env.get('SKINS_THEME'),
@@ -102,7 +110,62 @@ async function refreshTheme($: EngineInterface): Promise<void> {
   const needsSystem = resolveLight(hints) !== resolveLight({ ...hints, systemDark: false })
   const isLight = resolveLight({ ...hints, systemDark: needsSystem ? await systemDark($) : undefined })
 
-  await update($, lightAtom, () => isLight)
+  // Every write redraws every card that reads it, so the minute's poll writes only a change.
+  if ((await read($, lightAtom)) !== isLight) await update($, lightAtom, () => isLight)
+
+  return { followsSystem: needsSystem, reducesMotion: rows.find(row => row.key === 'reduceMotion')?.value === true }
+}
+
+// A row as one surface draws it: every attached surface runs the hook on its own, so one
+// surface's draw says nothing about another's.
+const drawKey = (e: { surface: RenderSurface; requestId?: string | undefined }): string | undefined =>
+  e.requestId === undefined ? undefined : `${e.surface}:${e.requestId}`
+
+// Rows whose cards have been drawn once; a later draw of one holds its card still (see drawOnce).
+// ponytail: grows by one key per card row for the session; a reload clears it.
+const drawn = new Set<string>()
+const redraw = (key: string | undefined): boolean => {
+  if (key === undefined) return false
+  const seen = drawn.has(key)
+  drawn.add(key)
+  return seen
+}
+
+// Each reply's segments as last drawn. A redraw holds the reply still, but a table that
+// only gained rows, as one does while its reply streams, lets the new rows rise in.
+// ponytail: keeps every reply with a table for the session; a reload clears it.
+const shown = new Map<string, readonly Segment[]>()
+const freshRows = (key: string | undefined, segments: readonly Segment[]): (number | undefined)[] | undefined => {
+  if (key === undefined) return undefined
+  const last = shown.get(key)
+  shown.set(key, segments)
+  if (last === undefined) return undefined
+
+  // A table is matched to the one at its own place among the reply's tables, so text or code
+  // arriving ahead of it, which moves it to a later segment, does not make it new.
+  const priorTables = last.filter(segment => segment.kind === 'table')
+  let nth = 0
+  return segments.map(segment => {
+    if (segment.kind !== 'table') return undefined
+    const prior = priorTables[nth++]
+    const before = prior?.kind === 'table' ? prior.rows : []
+    // The last row may have been drawn half-written and finished since, so it may differ.
+    const kept = before.slice(0, -1).every((row, r) => row.join('\n') === segment.rows[r]?.join('\n'))
+    return segment.rows.length > before.length && kept ? before.length : undefined
+  })
+}
+
+// The band's rings grow from their last reading (see rampFrom); once they have grown, one
+// more draw settles them.
+const ramp = rampFrom()
+let settle: { cancel(): void } | undefined
+
+// What the settings said when last read.
+type ConfigMemo = Awaited<ReturnType<typeof refreshTheme>>
+
+async function readConfig($: EngineInterface, memo: ConfigMemo): Promise<void> {
+  Object.assign(memo, await refreshTheme($))
+  holdStill(memo.reducesMotion)
 }
 
 // Every surface's element table names Svg, but the terminal draws it as nothing, so
@@ -216,6 +279,8 @@ export const register: Register = on => {
   let ticker: Timer | undefined
   // The width the last reply was drawn at, shown by /skin list to tune table sizing.
   let lastColumns: number | undefined
+  const config: ConfigMemo = { followsSystem: false, reducesMotion: false }
+  let themeTimer: Timer | undefined
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -231,7 +296,7 @@ export const register: Register = on => {
     })
     await load($)
     await refreshUsage($)
-    await refreshTheme($)
+    await readConfig($, config)
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -240,6 +305,10 @@ export const register: Register = on => {
         void update($, frameAtom, frame => frame + 1)
       }
     })
+    // An `auto` theme follows the system's appearance as it changes mid-session.
+    themeTimer?.cancel()
+    // Returns the read, so the tick's dispatch lasts until the theme is settled.
+    themeTimer = $.clock.every(THEME_TTL_MS, () => (config.followsSystem ? readConfig($, config) : undefined))
 
     return next(e)
   })
@@ -247,7 +316,7 @@ export const register: Register = on => {
   // /clear, /resume and /branch reset $.state to its defaults and skip session.start.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await load($)
-    await refreshTheme($)
+    await readConfig($, config)
 
     return next(e)
   })
@@ -264,8 +333,8 @@ export const register: Register = on => {
   on('config.set', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.key === 'theme') {
-      await refreshTheme($)
+    if (e.key === 'theme' || e.key === 'reduceMotion') {
+      await readConfig($, config)
     }
 
     return result
@@ -466,7 +535,9 @@ reply width: ${lastColumns} columns`
       const diff = hunksOf(e.props.output)
 
       if (diff !== null) {
-        return diffCard(look, look.svg, diff, shortenPath(diff.path, await $.session.cwd()), columns)
+        const shown = shortenPath(diff.path, await $.session.cwd())
+
+        return drawOnce(redraw(drawKey(e)), () => diffCard(look, look.svg!, diff, shown, columns))
       }
     }
 
@@ -474,7 +545,7 @@ reply width: ${lastColumns} columns`
       const shell = shellOutputOf(e.props.output)
 
       if (shell !== null) {
-        return terminalCard(look, look.svg, shell, e.props.isErrored, columns)
+        return drawOnce(redraw(drawKey(e)), () => terminalCard(look, look.svg!, shell, e.props.isErrored, columns))
       }
     }
 
@@ -527,7 +598,11 @@ reply width: ${lastColumns} columns`
       void $.ui.copy({ text: copied, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
     }
 
-    return replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined)
+    const svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
+    // Only a vector card animates, so only its draws are remembered.
+    const fresh = svg === undefined ? undefined : freshRows(drawKey(e), segments)
+
+    return drawOnce(fresh !== undefined, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg, fresh))
   })
 
   // The terminal's spinner gets the skin's word with a shimmer; the desktop's keeps its
@@ -549,7 +624,8 @@ reply width: ${lastColumns} columns`
 
     const word = pick(active.skin.spinner, e.props.word) ?? e.props.word
 
-    if (!active.prefs.shimmer || e.props.message !== null) {
+    // Claude Code's Reduce motion keeps its own still spinner, in the skin's word.
+    if (!active.prefs.shimmer || config.reducesMotion || e.props.message !== null) {
       return next({ ...e, props: { ...e.props, word } })
     }
 
@@ -603,9 +679,17 @@ reply width: ${lastColumns} columns`
       )
     }
 
+    const starts = ramp(meters, await $.clock.now())
+    if (settle === undefined && starts.some((start, i) => start !== meters[i]?.percent)) {
+      settle = $.clock.after(SETTLE_MS, () => {
+        settle = undefined
+        return update($, usageAtom, usage => ({ ...usage }))
+      })
+    }
+
     return (
       <Box flexDirection="column">
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact)}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts)}
         {theirs}
       </Box>
     )

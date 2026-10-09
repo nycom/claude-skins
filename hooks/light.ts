@@ -17,8 +17,39 @@ const toHex = (rgb: readonly number[]): string =>
 export const deepen = (hex: string, amount: number): string =>
   toHex(channels(hex).map(value => value * (1 - amount)))
 
+// WCAG contrast ratio of two #rrggbb colours.
+export const contrast = (a: string, b: string): number => {
+  const luminance = (hex: string) => {
+    const [r = 0, g = 0, bl = 0] = channels(hex).map(value => {
+      const c = value / 255
+
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+    })
+
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+  }
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+
+  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05)
+}
+
+// The light host background the derived palettes are checked against.
+export const LIGHT_BG = '#faf9f5'
+
+// `hex` deepened by `amount`, then further in 4% steps until it reads at `min`:1 on the page.
+// Darkening towards black keeps the hue.
+const reads = (hex: string, amount: number, min = 4.5): string => {
+  let out = deepen(hex, amount)
+
+  for (let step = 0.04; contrast(out, LIGHT_BG) < min && step < 1; step += 0.04) {
+    out = deepen(hex, amount + (1 - amount) * step)
+  }
+
+  return out
+}
+
 export function toLight(palette: Palette): Palette {
-  const deep = (hex: string) => deepen(hex, 0.45)
+  const deep = (hex: string) => reads(hex, 0.45)
 
   return {
     read: deep(palette.read),
@@ -33,9 +64,9 @@ export function toLight(palette: Palette): Palette {
     muted: '#6b6b6b',
     surface: '#ffffff',
     zebra: '#f2f2f2',
-    ok: deepen(palette.ok, 0.5),
-    err: deepen(palette.err, 0.25),
-    warn: deepen(palette.warn, 0.5),
+    ok: reads(palette.ok, 0.5),
+    err: reads(palette.err, 0.25),
+    warn: reads(palette.warn, 0.5),
   }
 }
 

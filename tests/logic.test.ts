@@ -6,11 +6,13 @@ import { runDesign } from '../hooks/designer'
 import { clipLines, diffstat, formatDuration, formatMs, pick, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
-import { diffLines, diffSvg, hunksOf } from '../hooks/svg-diff'
+import { MAX_ALT } from '../hooks/svg-kit'
+import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
-import { limitLabel, meterColor, metersOf, usageSvg } from '../hooks/svg-usage'
-import { deepen, isLightTheme, resolveLight, toLight } from '../hooks/light'
+import { limitLabel, meterColor, metersOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
+import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
+import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
 import tokyoNight from '../hooks/themes/tokyo-night'
@@ -203,6 +205,43 @@ test('a vector table stays within its width and escapes what it draws', async ()
   expect(card.source).toContain('prefers-reduced-motion')
 })
 
+test('a long table rises in within a quarter second, its rows visible without the animation', async () => {
+  const rows = Array.from({ length: 40 }, (_, i) => [`row ${i}`])
+  const card = tableSvg({ kind: 'table', header: ['a'], align: ['left'], rows }, tokyoNight.palette, 700)
+  const delays = [...card.source.matchAll(/animation-delay:(\d+)ms/g)].map(match => Number(match[1]))
+
+  expect(delays.length).toBe(40)
+  expect(Math.max(...delays) - Math.min(...delays)).toBeLessThanOrEqual(250)
+  expect(card.source).not.toContain('.row{opacity:0')
+})
+
+test('a copied patch names the file relative to the session, or by its absolute path outside it', async () => {
+  const diff = { path: '/work/src/a.ts', hunks: [{ oldStart: 1, newStart: 1, lines: ['-a', '+b'] }], isNewFile: false }
+
+  expect(patchText(diff, 'src/a.ts')).toBe('--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-a\n+b')
+  expect(patchText({ ...diff, path: '/tmp/a.ts' }, '/tmp/a.ts').split('\n').slice(0, 2)).toEqual(['--- /tmp/a.ts', '+++ /tmp/a.ts'])
+})
+
+test('a changed line draws its numbers and sign in the text colour, readable on its tint', async () => {
+  const { fg, muted } = tokyoNight.palette
+  const card = diffSvg({ path: 'a.ts', hunks: [{ oldStart: 7, newStart: 9, lines: ['-a', '+b'] }], isNewFile: false }, 'a.ts', tokyoNight.palette, 600)
+
+  for (const text of ['7', '9', '−', '+']) {
+    expect(card.source).toContain(`style="fill:${fg}">${text}</text>`)
+    expect(card.source).not.toContain(`style="fill:${muted}">${text}</text>`)
+  }
+})
+
+test('a huge new file still draws at once, its alt capped in characters', async () => {
+  const lines = Array.from({ length: 2000 }, (_, i) => `+const line${i} = '${'x'.repeat(60)}'`)
+  const card = diffSvg({ path: 'big.ts', hunks: [{ oldStart: 0, newStart: 1, lines }], isNewFile: true }, 'big.ts', tokyoNight.palette, 800)
+  const code = codeSvg(lines.join('\n').repeat(4), 'ts', tokyoNight.palette, 800)
+
+  expect(card.alt.length).toBeLessThanOrEqual('big.ts: +2000 −0\n'.length + MAX_ALT + 1)
+  expect(code.alt.length).toBeLessThanOrEqual('ts:\n'.length + MAX_ALT + 1)
+  expect(card.alt.length).toBeGreaterThan(MAX_ALT)
+})
+
 test('a patch numbers its lines on each side and marks the gap between hunks', async () => {
   const lines = diffLines([
     { oldStart: 10, newStart: 10, lines: [' a', '-b', '+c', '+d'] },
@@ -229,7 +268,8 @@ test('a new file with an empty patch shows its content as added lines', async ()
   const card = diffSvg(diff!, 'a.ts', tokyoNight.palette, 600)
 
   expect(card.source).toContain('new file')
-  expect(card.alt).toBe('a.ts: +2 −0')
+  // The alt carries the whole patch, as Copy does, since the card cuts long lines and stops at 30.
+  expect(card.alt).toBe('a.ts: +2 −0\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1,2 @@\n+x\n+y')
 })
 
 test('shell output loses its colour codes, keeps stderr apart and folds the middle', async () => {
@@ -308,4 +348,52 @@ test('a pinned folder keeps its own prefs, others follow the default', async () 
   expect(prefsFor('/c', folders, DEFAULT_PREFS)).toBe(DEFAULT_PREFS)
   expect(Object.keys(withoutFolder(withFolder(folders, '/c', pinned), '/a'))).toEqual(['/b', '/c'])
   expect(parseFolders('junk', NAMES)).toEqual({})
+})
+
+test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async () => {
+  const roles = ['read', 'write', 'run', 'search', 'web', 'mcp', 'other', 'user', 'fg', 'muted', 'ok', 'err', 'warn'] as const
+  const made = resolveSkin('my-noir', { 'my-noir': { name: 'my-noir', label: 'x', base: 'noir', palette: {}, spinner: [], done: [] } })
+  const dark = ['#262624', '#1f1e1d']
+
+  for (const skin of [...SKINS, ...(made === undefined ? [] : [made])]) {
+    for (const role of roles) {
+      for (const bg of dark) {
+        expect(`${skin.name} dark ${role} ${contrast(skin.palette[role], bg) >= 4.5}`).toBe(`${skin.name} dark ${role} true`)
+      }
+
+      const light = forTheme(skin, true).palette[role]
+
+      expect(`${skin.name} light ${role} ${contrast(light, LIGHT_BG) >= 4.5}`).toBe(`${skin.name} light ${role} true`)
+    }
+
+    for (const [mode, palette, bgs] of [['dark', skin.palette, dark], ['light', forTheme(skin, true).palette, [LIGHT_BG]]] as const) {
+      for (const bg of bgs) {
+        // A changed line's text, numbers and sign sit on its tint, at 4.5:1.
+        for (const tint of [palette.ok, palette.err]) {
+          expect(`${skin.name} ${mode} text on tint ${contrast(palette.fg, over(tint, TINT_OPACITY, bg)) >= 4.5}`).toBe(`${skin.name} ${mode} text on tint true`)
+        }
+
+        // A meter's fill reads at 3:1 against the page and against its track.
+        for (const fill of [palette.user, palette.warn, palette.err]) {
+          const track = over(palette.muted, TRACK_OPACITY, bg)
+          expect(`${skin.name} ${mode} ${fill} ${Math.min(contrast(fill, bg), contrast(fill, track)) >= 3}`).toBe(`${skin.name} ${mode} ${fill} true`)
+        }
+      }
+    }
+  }
+})
+
+// `top` at `alpha` over `bg`, as the card paints it.
+const over = (top: string, alpha: number, bg: string): string =>
+  `#${[1, 3, 5]
+    .map(at => Math.round(parseInt(top.slice(at, at + 2), 16) * alpha + parseInt(bg.slice(at, at + 2), 16) * (1 - alpha)).toString(16).padStart(2, '0'))
+    .join('')}`
+
+test('a made skin keeps its base skin\'s light palette, and derives the slots it changed', async () => {
+  const custom = { mine: { name: 'mine', label: 'Mine', base: 'noir', palette: { read: '#ffffff' }, spinner: [], done: [] } }
+  const light = resolveSkin('mine', custom)?.light
+
+  expect(light?.write).toBe('#111111')
+  expect(light?.read).not.toBe('#111111')
+  expect(contrast(light?.read ?? '#ffffff', LIGHT_BG)).toBeGreaterThanOrEqual(4.5)
 })

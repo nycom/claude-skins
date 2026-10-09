@@ -1,5 +1,5 @@
 import type { Palette } from './skin'
-import { CONTROL_SLOT, escape, HEADER_MID, fitText, MONO, riseDelay, svgCard, tint } from './svg-kit'
+import { capAlt, CONTROL_SLOT, escape, HEADER_MID, MONO, riseDelay, svgCard, tint } from './svg-kit'
 
 // A fenced code block as a card: the language and line count in a header, line numbers
 // in a gutter, and light highlighting of comments, strings, numbers and keywords.
@@ -89,7 +89,7 @@ export function codeSvg(code: string, lang: string, palette: Palette, width: num
       .map(token => `<tspan style="fill:${color[token.role]}${token.role === 'keyword' ? ';font-weight:600' : ''}${token.role === 'comment' ? ';font-style:italic' : ''}">${escape(token.text)}</tspan>`)
       .join('')
 
-    return `<g class="rise" ${riseDelay(i, 12, 60)}><text x="${gutter - 12}" y="${top + 14}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted};fill-opacity:.7">${i + 1}</text><text x="${gutter}" y="${top + 14}" font-family="${MONO}" font-size="${CODE}" xml:space="preserve">${spans}</text></g>`
+    return `<g class="rise" ${riseDelay(i, 12, 60)}><text x="${gutter - 12}" y="${top + 14}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted}">${i + 1}</text><text x="${gutter}" y="${top + 14}" font-family="${MONO}" font-size="${CODE}" xml:space="preserve">${spans}</text></g>`
   })
 
   const hidden = all.length - lines.length
@@ -106,6 +106,6 @@ export function codeSvg(code: string, lang: string, palette: Palette, width: num
     source: svgCard(width, height, palette, '', header + rows.join('') + footer),
     width,
     height,
-    alt: `${lang || 'code'}:\n${fitText(code, 4000, true, CODE)}`,
+    alt: `${lang || 'code'}:\n${capAlt(code)}`,
   }
 }

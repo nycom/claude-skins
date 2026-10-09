@@ -3,7 +3,7 @@
 A modern skin for Claude Code. A [mod](https://code.claude.com/docs/en/plugins/mods/overview) that
 redraws the transcript: tool calls with icons and timings, edits as diff cards, tables and code as
 animated cards, shell output in a terminal card, a spinner that shows what Claude is doing, and a band
-above the prompt with your context and plan limits and a Compact button. Seven skins, light and dark,
+above the prompt with your context and plan limits and, from 50% context, a Compact button. Seven skins, light and dark,
 a settings page, and your own agent can design a new skin with you.
 
 <img alt="The same Claude Code turn switching skins with /skin: noir, Tokyo Night, Dracula, Catppuccin" src="docs/demo.gif">
@@ -48,22 +48,34 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 
 | Site | Desktop app | Terminal |
 |---|---|---|
-| Tool calls | A line icon per kind, a spinning ring while it runs, lines changed and time taken | A node on the turn's rail with the same facts |
-| Edits | A diff card: file, `+N −M`, numbered changed lines in green and red | Claude Code's own diff |
+| Tool calls | A line icon per kind, a spinning ring while it runs, a cross when it failed and a dotted ring when interrupted, lines changed and time taken | A node on the turn's rail with the same facts |
+| Edits | A diff card: file, `+N −M`, the first lines changed, numbered, in green and red, and a Copy diff button for the whole patch; the alt text carries the patch too, capped at 4000 characters, with paths relative to the session (`a/` and `b/`) | Claude Code's own diff |
 | Shell commands | A terminal card: status pill, output with stderr apart, long output folded, and a Copy button for the output | Claude Code's own output |
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | Rings for context and each plan limit, a Compact button, and a nudge to compact from 70% context | Block meters and the same button |
+| Above the prompt | A band as tall as the PR bar and the input: rings for context and each plan limit, a Compact button from 50% context, and from 70% a "Compact now" nudge with a soft halo pulsing on the context ring | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
 
-Every card rises in row by row and respects reduced motion. A skin only changes what is drawn: the stored
+A card rises in row by row on its first draw only, the last row starting within a quarter second of
+the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
+theme change) never replays it. A table that streams in rises only the rows added since its last draw.
+The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s
+after a change the band settles still, so nothing replays. Reduced motion holds the icons, the cards,
+the band's rings and the pulse still, whether it is the system's setting or
+Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each Copy button says what it
+copies: table, code, diff or output. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
 Claude Code's own drawing. The default skin is **noir**, black and white. Cards have no background of
-their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette. With the `auto` theme it
-follows your terminal's background (`COLORFGBG`) or, failing that, the system's light or dark mode.
+their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette,
+and a skin you made from a built-in keeps that skin's light palette. Every role in every skin reads at
+4.5:1 or better on Claude Code's dark backgrounds, where the muted text was lifted wherever it fell short, and
+on its light one, where the palettes derived from the dark ones are checked and deepened until they do.
+On a diff, line numbers and `+`/`−` are drawn in the text colour so they stay readable on the tint, and
+the band's rings are a faint track under a fill that holds 3:1 against it. With the `auto` theme it
+follows your terminal's background (`COLORFGBG`) or, failing that, the system's light or dark mode, checked again every minute.
 Set `SKINS_THEME=light` or `SKINS_THEME=dark` to choose yourself, for example when you launch with
 `claude --settings '{"theme":"dark"}'`, which skins cannot see.
 
@@ -84,8 +96,8 @@ Your choices are remembered across sessions.
 ## What it can reach
 
 It draws and remembers. It reads the session's directory, your context and plan usage, Claude
-Code's theme setting and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
-compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance (`defaults read -g AppleInterfaceStyle`
+Code's theme and Reduce motion settings and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
+compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
 on macOS, `gsettings get org.gnome.desktop.interface color-scheme` on GNOME); it starts no other
 process, touches no file and makes no network call.
 Check it yourself:
