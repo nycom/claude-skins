@@ -10,6 +10,8 @@ const LINE_H = 22
 const GAP_H = 20
 const CODE = 12.5
 const MAX_LINES = 30
+// The green or red wash behind a changed line.
+export const TINT_OPACITY = 0.1
 const PENCIL = '<path d="M4 20h4L18.5 9.5a2.83 2.83 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>'
 const NEW_FILE = '<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M12 11v6M9 14h6"/>'
 
@@ -69,7 +71,9 @@ export function hunksOf(output: unknown): DiffInput | null {
 }
 
 // The patch as unified-diff text, for the clipboard and for a reader that cannot see the card.
-export function patchText(input: DiffInput): string {
+// `shownPath` is the path relative to the session when the file is under it, which takes
+// git's a/ and b/; an absolute path stands as it is.
+export function patchText(input: DiffInput, shownPath: string): string {
   const hunks = input.hunks.map(hunk => {
     const lines = hunk.lines.filter(line => !line.startsWith('\\'))
     const oldCount = lines.filter(line => !line.startsWith('+')).length
@@ -78,7 +82,10 @@ export function patchText(input: DiffInput): string {
     return [`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`, ...hunk.lines].join('\n')
   })
 
-  return [`--- ${input.isNewFile ? '/dev/null' : `a/${input.path}`}`, `+++ b/${input.path}`, ...hunks].join('\n')
+  const isAbsolute = /^([/\\~]|[A-Za-z]:)/.test(shownPath)
+  const [before, after] = isAbsolute ? [shownPath, shownPath] : [`a/${shownPath}`, `b/${shownPath}`]
+
+  return [`--- ${input.isNewFile ? '/dev/null' : before}`, `+++ ${after}`, ...hunks].join('\n')
 }
 
 // `hasControl` leaves the header's right corner free for a Copy button laid over it.
@@ -105,11 +112,14 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
 
     const tint = line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : undefined
     const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ''
-    const band = tint === undefined ? '' : `<rect y="${top}" width="${width}" height="${LINE_H}" fill="${tint}" fill-opacity=".1"/><rect y="${top}" width="1" height="${LINE_H}" fill="${tint}"/>`
+    const band = tint === undefined ? '' : `<rect y="${top}" width="${width}" height="${LINE_H}" fill="${tint}" fill-opacity="${TINT_OPACITY}"/><rect y="${top}" width="1" height="${LINE_H}" fill="${tint}"/>`
+    // On a tinted row, numbers and the sign are drawn in the text colour: muted, green or
+    // red on their own tint fall under 4.5:1 in some skins. The tint and stripe carry the colour.
+    const ink = tint === undefined ? palette.muted : palette.fg
     const number = (value: number | undefined, x: number) =>
-      value === undefined ? '' : `<text x="${x}" y="${top + 15}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted}">${value}</text>`
+      value === undefined ? '' : `<text x="${x}" y="${top + 15}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${ink}">${value}</text>`
 
-    return `<g ${riseDelay(i, 18)} class="rise">${band}${number(line.old, 44)}${number(line.new, 80)}<text x="96" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${tint ?? palette.muted}">${sign}</text><text x="${codeX}" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${line.kind === 'ctx' ? palette.muted : palette.fg}" xml:space="preserve">${escape(fitText(line.text, codeWidth, true, CODE))}</text></g>`
+    return `<g ${riseDelay(i, 18)} class="rise">${band}${number(line.old, 44)}${number(line.new, 80)}<text x="96" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${ink}">${sign}</text><text x="${codeX}" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${line.kind === 'ctx' ? palette.muted : palette.fg}" xml:space="preserve">${escape(fitText(line.text, codeWidth, true, CODE))}</text></g>`
   })
 
   const footer = hidden > 0 ? `<text x="${codeX}" y="${y + 18}" font-size="11.5" style="fill:${palette.muted}">${hidden} more line${hidden === 1 ? '' : 's'}</text>` : ''
@@ -129,6 +139,6 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
     source: svgCard(width, height, palette, '', header + rows.join('') + footer),
     width,
     height,
-    alt: `${shownPath}: +${added} −${removed}\n${patchText(input)}`,
+    alt: `${shownPath}: +${added} −${removed}\n${fitText(patchText(input, shownPath), 4000, true, CODE)}`,
   }
 }

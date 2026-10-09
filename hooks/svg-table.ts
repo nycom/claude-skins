@@ -222,7 +222,6 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
     `.rule{stroke-dasharray:${cardWidth};animation:draw .8s cubic-bezier(.6,0,.2,1) .05s both}`,
     `@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1}}`,
     `@keyframes draw{from{stroke-dashoffset:${cardWidth}}to{stroke-dashoffset:0}}`,
-    `@media (prefers-reduced-motion:reduce){.row,.rule{animation:none}}`,
   ].join('')
 
   const body = [

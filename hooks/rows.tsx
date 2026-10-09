@@ -351,7 +351,7 @@ function copyButton(look: Look, key: string, text: string) {
   const { Button } = look.ui
   const copy = look.copy
 
-  return copy === undefined ? undefined : <Button key={key} label=" Copy table " plain dimColor onPress={() => copy(text)} />
+  return copy === undefined ? undefined : <Button key={key} label="Copy table" plain dimColor onPress={() => copy(text)} />
 }
 
 // A small Copy button under a card or block, flush right; nothing where nothing can copy.
@@ -479,7 +479,7 @@ export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement
 
 // The card shows the first lines; Copy gives the whole patch.
 export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPath: string, columns: number) {
-  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input), 'Copy diff')
+  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input, shownPath), 'Copy diff')
 }
 
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number) {

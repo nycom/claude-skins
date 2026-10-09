@@ -51,18 +51,17 @@ const PX_PER_COLUMN = 6.4
 export const cardWidth = (columns: number, min = 480, max = 1600): number =>
   Math.round(Math.min(max, Math.max(min, columns * PX_PER_COLUMN)))
 
-// Rows that rise in one after another, honouring reduced motion. Rows are visible by
-// default: the animation's `both` fill hides one only while its delay runs.
+// Rows that rise in one after another; `still()` holds them for reduced motion. Rows are
+// visible by default: the animation's `both` fill hides one only while its delay runs.
 export const MOTION = [
   '.rise{animation:rise .45s cubic-bezier(.2,.8,.2,1) both}',
   '.card{animation:fade .3s ease-out}',
   '@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1}}',
   '@keyframes fade{from{opacity:0}to{opacity:1}}',
-  '@media (prefers-reduced-motion:reduce){.rise,.card{animation:none;opacity:1}}',
 ].join('')
 
 // However many rows a card has, the last starts rising within this of the first.
-export const MAX_STAGGER_MS = 250
+const MAX_STAGGER_MS = 250
 
 export const staggerMs = (index: number, stepMs: number): number => Math.min(index * stepMs, MAX_STAGGER_MS)
 

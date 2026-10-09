@@ -6,10 +6,10 @@ import { runDesign } from '../hooks/designer'
 import { clipLines, diffstat, formatDuration, formatMs, pick, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
-import { diffLines, diffSvg, hunksOf } from '../hooks/svg-diff'
+import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
-import { limitLabel, meterColor, metersOf, usageSvg } from '../hooks/svg-usage'
+import { limitLabel, meterColor, metersOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
 import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
@@ -214,6 +214,13 @@ test('a long table rises in within a quarter second, its rows visible without th
   expect(card.source).not.toContain('.row{opacity:0')
 })
 
+test('a copied patch names the file relative to the session, or by its absolute path outside it', async () => {
+  const diff = { path: '/work/src/a.ts', hunks: [{ oldStart: 1, newStart: 1, lines: ['-a', '+b'] }], isNewFile: false }
+
+  expect(patchText(diff, 'src/a.ts')).toBe('--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-a\n+b')
+  expect(patchText({ ...diff, path: '/tmp/a.ts' }, '/tmp/a.ts').split('\n').slice(0, 2)).toEqual(['--- /tmp/a.ts', '+++ /tmp/a.ts'])
+})
+
 test('a patch numbers its lines on each side and marks the gap between hunks', async () => {
   const lines = diffLines([
     { oldStart: 10, newStart: 10, lines: [' a', '-b', '+c', '+d'] },
@@ -241,7 +248,7 @@ test('a new file with an empty patch shows its content as added lines', async ()
 
   expect(card.source).toContain('new file')
   // The alt carries the whole patch, as Copy does, since the card cuts long lines and stops at 30.
-  expect(card.alt).toBe('a.ts: +2 −0\n--- /dev/null\n+++ b//w/a.ts\n@@ -0,0 +1,2 @@\n+x\n+y')
+  expect(card.alt).toBe('a.ts: +2 −0\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1,2 @@\n+x\n+y')
 })
 
 test('shell output loses its colour codes, keeps stderr apart and folds the middle', async () => {
@@ -337,8 +344,29 @@ test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async
 
       expect(`${skin.name} light ${role} ${contrast(light, LIGHT_BG) >= 4.5}`).toBe(`${skin.name} light ${role} true`)
     }
+
+    for (const [mode, palette, bgs] of [['dark', skin.palette, dark], ['light', forTheme(skin, true).palette, [LIGHT_BG]]] as const) {
+      for (const bg of bgs) {
+        // A changed line's text, numbers and sign sit on its tint, at 4.5:1.
+        for (const tint of [palette.ok, palette.err]) {
+          expect(`${skin.name} ${mode} text on tint ${contrast(palette.fg, over(tint, TINT_OPACITY, bg)) >= 4.5}`).toBe(`${skin.name} ${mode} text on tint true`)
+        }
+
+        // A meter's fill reads at 3:1 against the page and against its track.
+        for (const fill of [palette.user, palette.warn, palette.err]) {
+          const track = over(palette.muted, TRACK_OPACITY, bg)
+          expect(`${skin.name} ${mode} ${fill} ${Math.min(contrast(fill, bg), contrast(fill, track)) >= 3}`).toBe(`${skin.name} ${mode} ${fill} true`)
+        }
+      }
+    }
   }
 })
+
+// `top` at `alpha` over `bg`, as the card paints it.
+const over = (top: string, alpha: number, bg: string): string =>
+  `#${[1, 3, 5]
+    .map(at => Math.round(parseInt(top.slice(at, at + 2), 16) * alpha + parseInt(bg.slice(at, at + 2), 16) * (1 - alpha)).toString(16).padStart(2, '0'))
+    .join('')}`
 
 test('a made skin keeps its base skin\'s light palette, and derives the slots it changed', async () => {
   const custom = { mine: { name: 'mine', label: 'Mine', base: 'noir', palette: { read: '#ffffff' }, spinner: [], done: [] } }
