@@ -30,7 +30,7 @@ a settings page, and your own agent can design a new skin with you.
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/previews/usage-light.svg">
-  <img alt="Context and plan limit rings" src="docs/previews/usage-dark.svg">
+  <img alt="Context and plan limit rings with tokens and resets, and the context breakdown bar" src="docs/previews/usage-dark.svg">
 </picture>
 
 These previews are drawn by the mod's own card code (`scripts/previews.ts`), not screenshots.
@@ -54,7 +54,7 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | A band as tall as the PR bar and the input: rings for context (with its tokens, `96k/200k`) and each plan limit (with when it resets: `2:40pm` today, `tmrw 9:00am`, `Mon 9:00am` within the week, `next Fri 9:00am` a week off; none once it has passed), a thin bar of what fills the context as /context counts it, its three largest parts named (`msgs 61% · tools 22% · sys 9%`), a Compact button from 50% context, and from 70% a "Compact now" nudge with a soft halo pulsing on the context ring. A narrow band drops the part names first, then the bar, the resets and the tokens; the Compact button never moves for them | Block meters with the same tokens and resets, the parts as a row of coloured cells, and the same button, pressed with `c` once ctrl+x tab focuses the band |
+| Above the prompt | A band as tall as the PR bar and the input: rings for context (with its tokens, `96k/200k`) and each plan limit (with when it resets: `2:40pm` today, `tmrw 9:00am`, `Mon 9:00am` within the week, `next Fri 9:00am` a week off; none once it has passed), a thin bar of what fills the context as /context counts it, its three largest parts named (`msgs 61% · tools 22% · sys 9%`), a Compact button from 50% context, and from 70% a "Compact now" nudge with a soft halo pulsing on the context ring. A narrow band drops the part names first, then the bar, the resets and the tokens; the Compact button never moves for them. A reset's label redraws at midnight and when it passes. Another mod's drawing there sits above the band, so the band stays nearest the prompt | Block meters with the same tokens and resets, the parts as a row of coloured cells with the same names, and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
@@ -75,7 +75,7 @@ and a skin you made from a built-in keeps that skin's light palette. Every role 
 4.5:1 or better on Claude Code's dark backgrounds, where the muted text was lifted wherever it fell short, and
 on its light one, where the palettes derived from the dark ones are checked and deepened until they do.
 On a diff, line numbers and `+`/`−` are drawn in the text colour so they stay readable on the tint, and
-the band's rings and context bar are a faint track under fills that hold 3:1 against it. With the `auto` theme it
+the band's rings and context bar are a faint track under fills that hold 3:1 against it; on a skin that gives the parts one colour, as noir does, each part sharing an earlier one's colour steps down in opacity (1, .8, .6) and a 1px gap parts the segments. With the `auto` theme it
 follows your terminal's background (`COLORFGBG`) or, failing that, the system's light or dark mode, checked again every minute.
 Set `SKINS_THEME=light` or `SKINS_THEME=dark` to choose yourself, for example when you launch with
 `claude --settings '{"theme":"dark"}'`, which skins cannot see.
@@ -96,7 +96,7 @@ Your choices are remembered across sessions.
 
 ## What it can reach
 
-It draws and remembers. It reads the session's directory, your context and plan usage, Claude
+It draws and remembers. It reads the session's directory, your context and plan usage (and, while the band is on, the local estimate of what fills the context), Claude
 Code's theme and Reduce motion settings and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
 compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
 on macOS, `gsettings get org.gnome.desktop.interface color-scheme` on GNOME); it starts no other
