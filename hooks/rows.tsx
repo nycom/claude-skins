@@ -500,13 +500,13 @@ export const COMPACT_NUDGE = 70
 // (`c: Compact`); the desktop's button is pressed with the pointer.
 export const COMPACT_HOTKEY = 'c'
 
-function meterView(look: Look, meters: readonly Meter[], from?: From) {
+function meterView(look: Look, meters: readonly Meter[], from?: From, isPulsing = false) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
   if (look.svg !== undefined) {
     const Svg = look.svg
-    const built = usageSvg(meters, palette, from)
+    const built = usageSvg(meters, palette, from, isPulsing)
 
     return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
   }
@@ -535,7 +535,7 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
   return (
     // The right edge stays clear: the band draws its own collapse mark ([-]) there.
     <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      {meterView(look, meters, from)}
+      {meterView(look, meters, from, isOffered && isNudge)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
       {isOffered ? (

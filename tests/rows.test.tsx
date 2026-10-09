@@ -678,6 +678,7 @@ test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards 
 })
 
 test('the band hides Compact below 50% context and offers it, dimmed, from 50%', async ($, on) => {
+  mock.clock(on)
   let percent = 40
   on('session.cwd', () => ({ value: '/work' }))
   on('store.get', () => ({ value: undefined }))
@@ -724,8 +725,36 @@ test('a card animates on its first draw only: a redraw of the same row holds sti
   await table.unmount()
 })
 
+test('when the context ring moves, a weekly ring that did not move stays full instead of replaying', async ($, on) => {
+  mock.clock(on)
+  let percent = 40
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [{ kind: 'seven_day', percentUsed: 19 }] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const ring = async () => {
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    const band = await $.ui.mount(BAND('desktop', false))
+    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    await band.unmount()
+    return source
+  }
+
+  const first = await ring()
+  expect(first).toContain('@keyframes fill0{')
+  expect(first).toContain('@keyframes fill1{')
+  percent = 55
+  const moved = await ring()
+  expect(moved).toContain('@keyframes fill0{')
+  expect(moved).not.toContain('fill1')
+})
+
 test('the context ring grows from its last reading, and a redraw at the same reading is the same image', async ($, on) => {
   let percent = 40
+  const clock = mock.clock(on)
   on('session.cwd', () => ({ value: '/work' }))
   on('store.get', () => ({ value: undefined }))
   on('ui.render', () => STOCK)
@@ -747,8 +776,45 @@ test('the context ring grows from its last reading, and a redraw at the same rea
   const grown = await ring()
   expect(grown).toContain(`@keyframes fill0{from{stroke-dasharray:${(circumference * 40) / 100} `)
   expect(await ring()).toBe(grown)
+  // Once grown, the band settles: an image built again has nothing left to replay.
+  await clock.advance(1200)
+  const settled = await ring()
+  expect(settled).not.toContain('@keyframes fill')
+  expect(await ring()).toBe(settled)
   // The fill arc sits on its track: one centre per ring.
   const centres = [...grown.matchAll(/<circle[^>]* cx="([\d.]+)" cy="([\d.]+)"/g)].map(m => `${m[1]},${m[2]}`)
   expect(centres.length).toBe(2)
   expect(centres[1]).toBe(centres[0])
+})
+
+test('from 70% with Compact offered the context ring pulses, unless motion is reduced', async ($, on) => {
+  mock.clock(on)
+  let percent = 65
+  let reduces = false
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('env.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('config.list', () => ({ value: [{ key: 'reduceMotion', label: 'Reduce motion', kind: 'boolean', value: reduces, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const ring = async () => {
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    const band = await $.ui.mount(BAND('desktop', false))
+    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    await band.unmount()
+    return source
+  }
+  const held = (source: string) => source.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
+
+  expect(await ring()).not.toContain('pulse')
+  percent = 72
+  const nudged = await ring()
+  expect(nudged).toContain('@keyframes pulse{')
+  expect(nudged).toContain('animation:pulse 2s ease-in-out infinite')
+  expect(held(nudged)).toBe(false)
+  reduces = true
+  expect(held(await ring())).toBe(true)
 })

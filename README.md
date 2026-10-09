@@ -54,7 +54,7 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | Rings for context and each plan limit, a Compact button from 50% context, and a nudge to compact from 70% | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
+| Above the prompt | Rings for context and each plan limit, a Compact button from 50% context, and a nudge to compact from 70%, the context ring pulsing softly | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |

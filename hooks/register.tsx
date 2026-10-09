@@ -18,7 +18,7 @@ import { ICONS } from './skin'
 import type { Skin } from './skin'
 import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
-import { limitLabel, metersOf, rampFrom } from './svg-usage'
+import { limitLabel, metersOf, rampFrom, SETTLE_MS } from './svg-usage'
 import { shortenPath } from './format'
 import { drawOnce, holdStill } from './svg-kit'
 import { kindOf, summarize } from './tools'
@@ -125,8 +125,10 @@ const redraw = (requestId: string | undefined): boolean => {
   return seen
 }
 
-// The band's rings grow from their last reading (see rampFrom).
+// The band's rings grow from their last reading (see rampFrom); once they have grown, one
+// more draw settles them.
 const ramp = rampFrom()
+let settle: { cancel(): void } | undefined
 
 // What the settings said when last read.
 type ConfigMemo = { followsSystem: boolean; reducesMotion: boolean }
@@ -645,9 +647,17 @@ reply width: ${lastColumns} columns`
       )
     }
 
+    const starts = ramp(meters, await $.clock.now())
+    if (settle === undefined && starts.some((start, i) => start !== meters[i]?.percent)) {
+      settle = $.clock.after(SETTLE_MS, () => {
+        settle = undefined
+        return update($, usageAtom, usage => ({ ...usage }))
+      })
+    }
+
     return (
       <Box flexDirection="column">
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, ramp)}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, () => starts)}
         {theirs}
       </Box>
     )

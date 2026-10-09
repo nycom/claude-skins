@@ -15,20 +15,36 @@ const ITEM_W = 132
 
 export type Meter = { label: string; percent: number }
 
-// Where a ring's fill starts growing from, in percent.
-export type From = (meter: Meter) => number
+// Where each ring's fill starts growing from, in percent, one per meter.
+export type From = (meters: readonly Meter[]) => readonly number[]
 
-// A ring grows from the reading it last showed, not from empty. A redraw at the same
-// reading keeps the same start, so it draws the same image and nothing replays.
-export function rampFrom(): From {
-  const ramps = new Map<string, { from: number; to: number }>()
+// How long after a new reading the rings grow; past it they are drawn settled.
+export const SETTLE_MS = 1200
 
-  return meter => {
-    const last = ramps.get(meter.label)
-    const next = last === undefined ? { from: 0, to: meter.percent } : last.to === meter.percent ? last : { from: last.to, to: meter.percent }
-    ramps.set(meter.label, next)
+// A ring grows from the reading it last showed, not from empty. The band is one image, so a
+// new reading on any ring redraws them all: the rings that moved grow from where they were,
+// the rest are drawn already full. A redraw at the same readings keeps the same starts, so it
+// draws the same image and nothing replays, until SETTLE_MS have passed: from then on the
+// rings are drawn settled, so an image the surface builds again has no growth left to play.
+export function rampFrom(): (meters: readonly Meter[], now: number) => readonly number[] {
+  const shown = new Map<string, number>()
+  let key = ''
+  let changedAt = 0
+  let starts: readonly number[] = []
 
-    return next.from
+  return (meters, now) => {
+    const next = meters.map(meter => `${meter.label}:${meter.percent}`).join(',')
+
+    if (next !== key) {
+      starts = meters.map(meter => shown.get(meter.label) ?? 0)
+      meters.forEach(meter => shown.set(meter.label, meter.percent))
+      key = next
+      changedAt = now
+    } else if (now - changedAt >= SETTLE_MS) {
+      starts = meters.map(meter => meter.percent)
+    }
+
+    return starts
   }
 }
 
@@ -62,23 +78,32 @@ export const meterColor = (percent: number, palette: Palette): string =>
 // the page alike in every skin.
 export const TRACK_OPACITY = 0.2
 
-export function usageSvg(meters: readonly Meter[], palette: Palette, from: From = () => 0): { source: string; width: number; height: number; alt: string } {
+// A soft halo that breathes out from the context ring while the band nudges to compact.
+const PULSE = '@keyframes pulse{50%{stroke-width:6px;stroke-opacity:.35}}'
+
+export function usageSvg(meters: readonly Meter[], palette: Palette, from: From = meters => meters.map(() => 0), isPulsing = false): { source: string; width: number; height: number; alt: string } {
   const width = meters.length * ITEM_W
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
 
   const ramps: string[] = []
+  const starts = from(meters)
   const items = meters
     .map((meter, i) => {
       const x = i * ITEM_W + RING_R + 4
       const filled = (circumference * meter.percent) / 100
-      const start = (circumference * from(meter)) / 100
+      const start = (circumference * (starts[i] ?? 0)) / 100
       const color = meterColor(meter.percent, palette)
       // Each ring has its own keyframes, from where it was to where it is; none when it did not move.
       const grow = start === filled ? '' : ` style="animation:fill${i} .9s cubic-bezier(.2,.8,.2,1)"`
       ramps.push(start === filled ? '' : `@keyframes fill${i}{from{stroke-dasharray:${start} ${circumference}}}`)
 
+      const halo = isPulsing && meter.label === 'context'
+        ? `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-opacity="0" stroke-width="2.5" style="animation:pulse 2s ease-in-out infinite"/>`
+        : ''
+
       return [
+        halo,
         `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
         `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
         `<text x="${x + RING_R + 7}" y="${CY + 4}" font-size="12"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}</tspan></text>`,
@@ -89,6 +114,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, from: From 
   const style = [
     `text{font-family:${FONT}}`,
     ...ramps,
+    ...(isPulsing ? [PULSE] : []),
     still(),
   ].join('')
 
