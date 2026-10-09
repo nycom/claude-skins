@@ -1,9 +1,10 @@
 import type { UsageSnap } from '../types'
-import type { Palette } from './skin'
-import { escape, FONT, still } from './svg-kit'
+import { compactCount, resetLabel } from './format'
+import type { Palette, Slot } from './skin'
+import { escape, FONT, measure, still } from './svg-kit'
 
 // The band above the prompt: how full the context window is and how much of each plan
-// limit is spent, as rings that fill in when they draw.
+// limit is spent, as rings that fill in when they draw, and what fills the context, as a bar.
 
 const RING_R = 8
 
@@ -11,9 +12,19 @@ const RING_R = 8
 // 23 + 2 matches the PR status rows and the input box beside it (25pt each).
 export const BAND_H = 23
 const CY = BAND_H / 2
-const ITEM_W = 132
+// Room after a ring's text, before the next ring.
+const ITEM_GAP = 20
+const BAR_W = 64
+const BAR_H = 4
 
-export type Meter = { label: string; percent: number }
+// `note` follows the reading: the context's tokens, or when a plan limit resets.
+export type Meter = { label: string; percent: number; note?: string }
+
+// One part of what fills the context, as its share of it in percent.
+export type Part = { label: string; share: number; slot: Slot }
+
+// The breakdown bar, and whether its largest parts are named after it.
+export type Breakdown = { parts: readonly Part[]; isLabelled: boolean }
 
 // How long after a new reading the rings grow; past it they are drawn settled.
 export const SETTLE_MS = 1200
@@ -60,11 +71,61 @@ export function limitLabel(kind: string): string {
   return name.replace(/_/g, ' ')
 }
 
-export function metersOf(usage: UsageSnap): Meter[] {
+// `now` places each reset as a time today or a weekday further off.
+export function metersOf(usage: UsageSnap, now: number): Meter[] {
+  const tokens = usage.tokens === undefined || usage.window === undefined ? undefined : `${compactCount(usage.tokens)}/${compactCount(usage.window)}`
+
   return [
-    ...(usage.context === null ? [] : [{ label: 'context', percent: usage.context }]),
-    ...usage.limits.map(limit => ({ label: limit.label, percent: limit.percent })),
-  ].map(meter => ({ ...meter, percent: Math.max(0, Math.min(100, Math.round(meter.percent))) }))
+    ...(usage.context === null ? [] : [{ label: 'context', percent: usage.context, note: tokens }]),
+    ...usage.limits.map(limit => ({ label: limit.label, percent: limit.percent, note: resetLabel(limit.resetsAt, now) })),
+  ].map(({ note, ...meter }) => ({
+    ...meter,
+    percent: Math.max(0, Math.min(100, Math.round(meter.percent))),
+    ...(note === undefined ? {} : { note }),
+  }))
+}
+
+// The parts /context names, in a word each and a skin colour each; any other is `other`.
+const PARTS: Readonly<Record<string, { label: string; slot: Slot }>> = {
+  Messages: { label: 'msgs', slot: 'user' },
+  'System tools': { label: 'tools', slot: 'run' },
+  'System prompt': { label: 'sys', slot: 'read' },
+  'Memory files': { label: 'memory', slot: 'write' },
+  'MCP tools': { label: 'mcp', slot: 'mcp' },
+  Skills: { label: 'skills', slot: 'search' },
+  'Custom agents': { label: 'agents', slot: 'web' },
+}
+
+export const PART_SLOTS: readonly Slot[] = [...Object.values(PARTS).map(part => part.slot), 'other']
+
+// The parts that hold tokens, largest first, each as its share of them all.
+export function partsOf(parts: readonly { name: string; tokens: number }[]): Part[] {
+  const total = parts.reduce((sum, part) => sum + Math.max(0, part.tokens), 0)
+
+  return parts
+    .filter(part => part.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens)
+    .map(part => ({
+      label: PARTS[part.name]?.label ?? part.name.toLowerCase(),
+      share: Math.round((part.tokens / total) * 100),
+      slot: PARTS[part.name]?.slot ?? 'other',
+    }))
+}
+
+// The largest parts, named: `msgs 61%`.
+export const NAMED_PARTS = 3
+export const partNames = (parts: readonly Part[]): string[] => parts.slice(0, NAMED_PARTS).map(part => `${part.label} ${part.share}%`)
+
+// Where each part starts and ends along a bar `width` long.
+function partSpans(parts: readonly Part[], width: number): { part: Part; from: number; to: number }[] {
+  const total = parts.reduce((sum, part) => sum + part.share, 0)
+  let done = 0
+
+  return parts.map(part => {
+    const from = Math.round((width * done) / total)
+    done += part.share
+    return { part, from, to: Math.round((width * done) / total) }
+  })
 }
 
 // Accent while there is room; the warning colour from 80 %, the error colour from 95 %.
@@ -78,16 +139,25 @@ export const TRACK_OPACITY = 0.2
 // A soft halo that breathes out from the context ring while the band nudges to compact.
 const PULSE = '@keyframes pulse{50%{stroke-width:6px;stroke-opacity:.35}}'
 
+const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${meter.note === undefined ? '' : ` · ${meter.note}`}`
+
 // `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
-export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], isPulsing = false): { source: string; width: number; height: number; alt: string } {
-  const width = meters.length * ITEM_W
+// The breakdown bar follows the rings; it never animates, so a redraw is the same image.
+export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], isPulsing = false, breakdown?: Breakdown): { source: string; width: number; height: number; alt: string } {
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
+  const lefts: number[] = []
+  let width = 0
+
+  for (const meter of meters) {
+    lefts.push(width)
+    width += RING_R * 2 + 4 + 7 + Math.ceil(measure(meterText(meter), false, 12)) + ITEM_GAP
+  }
 
   const ramps: string[] = []
   const items = meters
     .map((meter, i) => {
-      const x = i * ITEM_W + RING_R + 4
+      const x = (lefts[i] ?? 0) + RING_R + 4
       const filled = (circumference * meter.percent) / 100
       const start = (circumference * (starts[i] ?? 0)) / 100
       const color = meterColor(meter.percent, palette)
@@ -103,10 +173,33 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
         halo,
         `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
         `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
-        `<text x="${x + RING_R + 7}" y="${CY + 4}" font-size="12"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}</tspan></text>`,
+        `<text x="${x + RING_R + 7}" y="${CY + 4}" font-size="12"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}${meter.note === undefined ? '' : ` · ${escape(meter.note)}`}</tspan></text>`,
       ].join('')
     })
     .join('')
+
+  let bar = ''
+
+  if (breakdown !== undefined && breakdown.parts.length > 0) {
+    const left = width + 4
+    const top = CY - BAR_H / 2
+    // A 1px gap parts the segments, so they read apart even where a skin gives them one colour.
+    const segments = partSpans(breakdown.parts, BAR_W)
+      .filter(span => span.to - span.from > 1)
+      .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}"/>`)
+    const names = breakdown.isLabelled
+      ? `<text x="${left + BAR_W + 8}" y="${CY + 4}" font-size="12">${partNames(breakdown.parts)
+          .map((name, i) => `${i === 0 ? '' : `<tspan style="fill:${palette.muted}"> · </tspan>`}<tspan style="fill:${palette[breakdown.parts[i]?.slot ?? 'other']}">${escape(name)}</tspan>`)
+          .join('')}</text>`
+      : ''
+
+    bar = [
+      `<rect x="${left}" y="${top}" width="${BAR_W}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${palette.muted}" fill-opacity="${TRACK_OPACITY}"/>`,
+      ...segments,
+      names,
+    ].join('')
+    width = left + BAR_W + (breakdown.isLabelled ? 8 + Math.ceil(measure(partNames(breakdown.parts).join(' · '), false, 12)) : 0) + 4
+  }
 
   const style = [
     `text{font-family:${FONT}}`,
@@ -116,18 +209,26 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
   ].join('')
 
   return {
-    source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${style}</style>${items}</svg>`,
+    source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${style}</style>${items}${bar}</svg>`,
     width,
     height,
-    alt: meters.map(meter => `${meter.label} ${meter.percent}%`).join(', '),
+    alt: [
+      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note})`}`).join(', '),
+      ...(bar === '' || breakdown === undefined ? [] : [`context holds ${partNames(breakdown.parts).join(', ')}`]),
+    ].join('; '),
   }
 }
 
-// The terminal's version: one line of block meters.
-export function usageLine(meters: readonly Meter[]): { label: string; bar: string; percent: number }[] {
+// The terminal's version: one line of block meters, and the breakdown as a bar of cells.
+export function usageLine(meters: readonly Meter[]): { text: string; bar: string }[] {
   return meters.map(meter => {
     const filled = Math.round(meter.percent / 12.5)
 
-    return { label: meter.label, bar: '▰'.repeat(filled) + '▱'.repeat(8 - filled), percent: meter.percent }
+    return { bar: '▰'.repeat(filled) + '▱'.repeat(8 - filled), text: ` ${meterText(meter)}` }
   })
 }
+
+export const partCells = (parts: readonly Part[]): { slot: Slot; cells: string }[] =>
+  partSpans(parts, 8)
+    .filter(span => span.to > span.from)
+    .map(span => ({ slot: span.part.slot, cells: '■'.repeat(span.to - span.from) }))

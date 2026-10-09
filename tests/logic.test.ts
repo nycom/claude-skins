@@ -3,14 +3,14 @@ import { expect, test } from 'claude-code/testing'
 import { DEFAULT_PREFS, parsePrefs, runSkinCommand } from '../hooks/command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from '../hooks/custom'
 import { runDesign } from '../hooks/designer'
-import { clipLines, diffstat, formatDuration, formatMs, pick, shortenPath } from '../hooks/format'
+import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
 import { MAX_ALT } from '../hooks/svg-kit'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
-import { limitLabel, meterColor, metersOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
+import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
 import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
@@ -295,12 +295,55 @@ test('code is split into comments, strings, numbers and keywords by language', a
 test('plan limits read as 5h and 7d, and a meter warns as it fills', async () => {
   expect(limitLabel('five_hour')).toBe('5h')
   expect(limitLabel('seven_day')).toBe('7d')
-  expect(metersOf({ context: 42.4, limits: [{ label: '5h', percent: 120 }] })).toEqual([
+  expect(metersOf({ context: 42.4, limits: [{ label: '5h', percent: 120 }] }, 0)).toEqual([
     { label: 'context', percent: 42 },
     { label: '5h', percent: 100 },
   ])
   expect(meterColor(85, tokyoNight.palette)).toBe(tokyoNight.palette.warn)
   expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
+})
+
+test('token counts read compactly, and a reset reads as a time today or a weekday further off', async () => {
+  expect([950, 1500, 96_000, 200_000, 999_700, 1_200_000].map(compactCount)).toEqual(['950', '1.5k', '96k', '200k', '1M', '1.2M'])
+
+  // Built from local times, so the expectations hold in any time zone.
+  const now = new Date(2026, 9, 9, 12, 0).getTime()
+  expect(resetLabel(new Date(2026, 9, 9, 14, 40).toISOString(), now)).toBe('2:40pm')
+  expect(resetLabel(new Date(2026, 9, 10, 0, 5).toISOString(), now)).toBe('12:05am')
+  expect(resetLabel(new Date(2026, 9, 10, 9, 0).toISOString(), now)).toBe('9:00am')
+  expect(resetLabel(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon')
+  expect(resetLabel(undefined, now)).toBeUndefined()
+  expect(resetLabel('soon', now)).toBeUndefined()
+
+  const usage = {
+    context: 48,
+    tokens: 96_000,
+    window: 200_000,
+    limits: [
+      { label: '5h', percent: 19, resetsAt: new Date(2026, 9, 9, 14, 40).toISOString() },
+      { label: '7d', percent: 23 },
+    ],
+  }
+  expect(metersOf(usage, now)).toEqual([
+    { label: 'context', percent: 48, note: '96k/200k' },
+    { label: '5h', percent: 19, note: '2:40pm' },
+    { label: '7d', percent: 23 },
+  ])
+  expect(metersOf({ ...usage, tokens: undefined }, now)[0]).toEqual({ label: 'context', percent: 48 })
+})
+
+test('the breakdown keeps what fills the window, largest first, as shares of it', async () => {
+  const parts = partsOf([
+    { name: 'System prompt', tokens: 9_000 },
+    { name: 'Messages', tokens: 61_000 },
+    { name: 'Memory files', tokens: 8_000 },
+    { name: 'System tools', tokens: 22_000 },
+    { name: 'Slash commands', tokens: 0 },
+  ])
+
+  expect(parts.map(part => `${part.label} ${part.share}`)).toEqual(['msgs 61', 'tools 22', 'sys 9', 'memory 8'])
+  expect(parts[0]?.slot).toBe('user')
+  expect(partsOf([])).toEqual([])
 })
 
 test('a long cell wraps on its words, breaks a word too long for the column, and caps its lines', async () => {
@@ -374,7 +417,8 @@ test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async
         }
 
         // A meter's fill reads at 3:1 against the page and against its track.
-        for (const fill of [palette.user, palette.warn, palette.err]) {
+        // So does each segment of the context breakdown bar.
+        for (const fill of [palette.user, palette.warn, palette.err, ...PART_SLOTS.map(slot => palette[slot])]) {
           const track = over(palette.muted, TRACK_OPACITY, bg)
           expect(`${skin.name} ${mode} ${fill} ${Math.min(contrast(fill, bg), contrast(fill, track)) >= 3}`).toBe(`${skin.name} ${mode} ${fill} true`)
         }

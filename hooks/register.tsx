@@ -19,7 +19,7 @@ import { ICONS } from './skin'
 import type { Skin } from './skin'
 import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
-import { limitLabel, metersOf, rampFrom, SETTLE_MS } from './svg-usage'
+import { limitLabel, metersOf, partsOf, rampFrom, SETTLE_MS } from './svg-usage'
 import { shortenPath } from './format'
 import { drawOnce, holdStill } from './svg-kit'
 import { kindOf, summarize } from './tools'
@@ -251,11 +251,19 @@ async function runFolderCommand($: EngineInterface, word: string): Promise<strin
   }
 }
 
+// The breakdown is the local estimate, which sends no requests; when it fails the band
+// goes on without its bar.
 async function refreshUsage($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage()
+  const usage = await $.session.usage({ breakdown: 'summary' }).catch(() => $.session.usage())
+  const categories = usage.context.breakdown?.categories
   const snap: UsageSnap = {
     context: usage.context.percent ?? null,
-    limits: usage.rateLimits.map(limit => ({ label: limitLabel(limit.kind), percent: limit.percentUsed })),
+    window: usage.context.window,
+    limits: usage.rateLimits.map(limit => ({ label: limitLabel(limit.kind), percent: limit.percentUsed, resetsAt: limit.resetsAt })),
+    ...(usage.context.tokens === undefined ? {} : { tokens: usage.context.tokens }),
+    ...(Array.isArray(categories)
+      ? { parts: categories.filter(category => category.kind === 'used').map(category => ({ name: category.name, tokens: category.tokens })) }
+      : {}),
   }
 
   await update($, usageAtom, () => snap)
@@ -654,7 +662,9 @@ reply width: ${lastColumns} columns`
   // sits last, nearest the prompt. Only the desktop spaces them: a terminal gap is a whole row.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const active = await activeSkin($)
-    const meters = metersOf(await read($, usageAtom))
+    const usage = await read($, usageAtom)
+    const now = await $.clock.now()
+    const meters = metersOf(usage, now)
 
     if (active === null || !active.prefs.band || e.props.hasSurvey || meters.length === 0) {
       return next(e)
@@ -680,7 +690,7 @@ reply width: ${lastColumns} columns`
       )
     }
 
-    const starts = ramp(meters, await $.clock.now())
+    const starts = ramp(meters, now)
     if (settle === undefined && starts.some((start, i) => start !== meters[i]?.percent)) {
       settle = $.clock.after(SETTLE_MS, () => {
         settle = undefined
@@ -691,7 +701,7 @@ reply width: ${lastColumns} columns`
     return (
       <Box flexDirection="column" rowGap={theirs && look.surface === 'desktop' ? 1 : 0}>
         {theirs}
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts)}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
       </Box>
     )
   })

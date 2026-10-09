@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
+import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
 
@@ -400,13 +401,13 @@ test('a code fence is a card on the desktop and stays markdown in the terminal',
   expect(await terminal.find({ type: 'Markdown' })).toBeDefined()
 })
 
-const BAND = (surface: (typeof SURFACES)[number], isWorking: boolean) =>
+const BAND = (surface: (typeof SURFACES)[number], isWorking: boolean, bodyColumns = 100) =>
   ({
     ...SITE,
     surface,
     component: 'AbovePrompt',
     requestId: 'band',
-    props: { hasSurvey: false, isWorking, maxRows: 4, bodyColumns: 100, scroll: { offset: 0, bodyRows: 4 }, view: {} },
+    props: { hasSurvey: false, isWorking, maxRows: 4, bodyColumns, scroll: { offset: 0, bodyRows: 4 }, view: {} },
   }) as const
 
 test('the band offers Compact, nudges at 70% context, and compacts on a press', async ($, on) => {
@@ -950,4 +951,161 @@ test('from 70% with Compact offered the context ring pulses, unless motion is re
   expect(held(nudged)).toBe(false)
   reduces = true
   expect(held(await ring())).toBe(true)
+})
+
+// A Friday noon, in local time so the reset labels hold in any time zone.
+const NOON = new Date(2026, 9, 9, 12, 0).getTime()
+
+const category = (name: string, tokens: number, kind = 'used') => ({ name, tokens, kind, color: 'x', isDeferred: kind === 'deferred' })
+
+// What `$.session.usage` answers with every extra the band can show: tokens, resets and the breakdown.
+const fullUsage = (percent: number, args: { breakdown?: string }) => ({
+  startedAt: 0,
+  context: {
+    tokens: percent * 2000,
+    window: 200_000,
+    percent,
+    ...(args.breakdown === undefined
+      ? {}
+      : {
+          breakdown: {
+            categories: [
+              category('System prompt', 9_000),
+              category('System tools', 22_000),
+              category('Memory files', 8_000),
+              category('Messages', 61_000),
+              category('MCP tools', 30_000, 'deferred'),
+              category('Free space', 67_000, 'free'),
+              category('Autocompact buffer', 33_000, 'buffer'),
+            ],
+          },
+        }),
+  },
+  rateLimits: [
+    { kind: 'five_hour', percentUsed: 19, resetsAt: new Date(2026, 9, 9, 14, 40).toISOString() },
+    { kind: 'seven_day', percentUsed: 23, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() },
+  ],
+})
+
+// Mounts the band against `usage` and hands back its desktop image source, or the terminal row's text.
+async function bandWith($: Engine, on: On, usage: (args: { breakdown?: string }) => unknown, reduces = false) {
+  const asked: (string | undefined)[] = []
+  mock.clock(on, { now: NOON })
+  on('session.cwd', () => ({ value: '/work' }))
+  // A skin with a colour per slot, so the breakdown's segments differ.
+  on('store.get', ($, e) => ({ value: e.key === 'prefs' ? { skin: 'tokyo-night' } : undefined }))
+  on('env.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('config.list', () => ({ value: [{ key: 'reduceMotion', label: 'Reduce motion', kind: 'boolean', value: reduces, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('session.usage', ($, e) => {
+    asked.push(e.breakdown)
+    return { value: usage(e) as never }
+  })
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  const draw = async (surface: (typeof SURFACES)[number], columns = 200) => {
+    const band = await $.ui.mount(BAND(surface, false, columns))
+    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source
+    const text = JSON.stringify(await band.drawn())
+    const hasCompact = (await band.find({ key: 'compact' })) !== undefined
+    await band.unmount()
+    return { source: source ?? '', text, hasCompact }
+  }
+
+  return { draw, asked }
+}
+
+test('the band shows tokens on the context ring, resets on the plan rings, and the context breakdown', async ($, on) => {
+  const { draw, asked } = await bandWith($, on, args => fullUsage(48, args))
+  const { source } = await draw('desktop')
+
+  // The breakdown is the local estimate, never the counted one that sends requests.
+  expect(asked).toEqual(['summary'])
+  expect(source).toContain('96k/200k')
+  expect(source).toContain('2:40pm')
+  expect(source).toContain('Mon')
+  expect(source).toContain('msgs 61%')
+  expect(source).toContain('tools 22%')
+  expect(source).toContain('sys 9%')
+  // Only the top three are named; free space, the buffer and deferred tools are not content.
+  expect(source).not.toContain('memory 8%')
+  expect(source).not.toContain('Free')
+  const palette = tokyoNight.palette
+  expect(source).toContain(`class="part" x="`)
+  for (const slot of ['user', 'run', 'read', 'write'] as const) {
+    expect(source).toContain(`fill="${palette[slot]}"`)
+  }
+
+  const terminal = await draw('terminal')
+  expect(terminal.text).toContain('48% context · 96k/200k')
+  expect(terminal.text).toContain('19% 5h · 2:40pm')
+  expect(terminal.text).toContain('23% 7d · Mon')
+  expect(terminal.text).toContain('■')
+  expect(terminal.text).toContain('msgs 61%')
+})
+
+test('the band leaves out tokens and resets it was not given, and the breakdown when it fails', async ($, on) => {
+  const { draw } = await bandWith($, on, args => {
+    if (args.breakdown !== undefined) {
+      throw new Error('no breakdown')
+    }
+
+    return { startedAt: 0, context: { window: 200_000, percent: 48 }, rateLimits: [{ kind: 'five_hour', percentUsed: 19 }] }
+  })
+  const { source } = await draw('desktop')
+
+  expect(source).toContain('48%')
+  expect(source).not.toContain(' · ')
+  expect(source).not.toContain('class="part"')
+  expect(source).not.toContain('msgs')
+  expect((await draw('terminal')).text).not.toContain(' · ')
+})
+
+test('a narrow band drops the breakdown labels, then the bar, then the resets, then the tokens, and keeps Compact', async ($, on) => {
+  let percent = 55
+  const { draw } = await bandWith($, on, args => fullUsage(percent, args))
+  const order = ['labels', 'bar', 'resets', 'tokens'] as const
+
+  for (const reading of [55, 85]) {
+    percent = reading
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+    for (const surface of SURFACES) {
+      const seen = new Set<string>()
+
+      for (let columns = 220; columns >= 20; columns -= 4) {
+        const { source, text, hasCompact } = await draw(surface, columns)
+        const drawn = surface === 'desktop' ? source : text
+        const shows = {
+          labels: drawn.includes('msgs 61%'),
+          bar: drawn.includes(surface === 'desktop' ? 'class="part"' : '■'),
+          resets: drawn.includes('2:40pm'),
+          tokens: drawn.includes(`${reading * 2}k/200k`),
+        }
+        const kept = order.map(extra => shows[extra])
+
+        // An extra shows only while every one after it in the order does.
+        const isInOrder = kept.every((isShown, i) => !isShown || kept.slice(i).every(Boolean))
+        expect(`${surface} ${reading}% ${columns}: ${kept.join(',')} ${isInOrder}`).toBe(`${surface} ${reading}% ${columns}: ${kept.join(',')} true`)
+        expect(`${surface} ${reading}% ${columns} compact ${hasCompact}`).toBe(`${surface} ${reading}% ${columns} compact true`)
+        seen.add(kept.join(','))
+      }
+
+      // Wide enough for everything, narrow enough for none, and each step between.
+      expect(`${surface} ${reading}% ${[...seen].join(' | ')}`).toBe(`${surface} ${reading}% true,true,true,true | false,true,true,true | false,false,true,true | false,false,false,true | false,false,false,false`)
+    }
+  }
+})
+
+test('the extras redraw as the same image at the same readings, hold still under Reduce motion', async ($, on) => {
+  const { draw } = await bandWith($, on, args => fullUsage(48, args), true)
+  const first = (await draw('desktop')).source
+
+  expect(first).toContain('class="part"')
+  expect(first).not.toContain('@keyframes part')
+  expect((await draw('desktop')).source).toBe(first)
+  expect(first.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('')).toContain('*{animation:none!important}')
 })
