@@ -458,6 +458,29 @@ test('the band offers Compact, nudges at 70% context, and compacts on a press', 
   expect(((await idle.find({ key: 'compact' })) as { props: { hotkey?: string } } | undefined)?.props.hotkey).toBe('c')
 })
 
+test('the band sits last, nearest the prompt, below another mod’s row', async ($, on) => {
+  // Registered first, so it is what the skin's hook reaches when it hands the band on.
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Text', props: {}, children: ['PROGRESS'] }))
+  stubEngine(on)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  for (const surface of SURFACES) {
+    const band = await $.ui.mount(BAND(surface, false))
+    const column = (await band.drawn()) as { children: readonly unknown[] }
+    const first = JSON.stringify(column.children[0])
+    const last = JSON.stringify(column.children[column.children.length - 1])
+
+    expect(first).toContain('PROGRESS')
+    expect(last).not.toContain('PROGRESS')
+    expect(last).toContain(surface === 'desktop' ? 'Svg' : '% context')
+    await band.unmount()
+  }
+})
+
 test('cards draw no background of their own', async ($, on) => {
   stubEngine(on)
 

@@ -649,8 +649,9 @@ reply width: ${lastColumns} columns`
     return footerRow(lookOf($.ui.resolve(e), active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
   })
 
-  // The band above the prompt: context and plan limits. Another mod's drawing there,
-  // and a survey, keep their place.
+  // The band above the prompt: context and plan limits. A survey keeps its place. Another
+  // mod's drawing there stays above the band, whatever order the hooks run in, so the band
+  // sits last, nearest the prompt. Only the desktop spaces them: a terminal gap is a whole row.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const active = await activeSkin($)
     const meters = metersOf(await read($, usageAtom))
@@ -688,9 +689,9 @@ reply width: ${lastColumns} columns`
     }
 
     return (
-      <Box flexDirection="column">
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts)}
+      <Box flexDirection="column" rowGap={theirs && look.surface === 'desktop' ? 1 : 0}>
         {theirs}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts)}
       </Box>
     )
   })
