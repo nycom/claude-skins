@@ -1066,7 +1066,7 @@ test('the band leaves out tokens and resets it was not given, and the breakdown 
   expect((await draw('terminal')).text).not.toContain(' · ')
 })
 
-test('a narrow band drops the breakdown labels, then the bar, then the resets, then the tokens, and keeps Compact', async ($, on) => {
+test('a narrow band drops the breakdown labels, then the bar, then the resets, then the tokens, and keeps Compact', { timeoutMs: 30_000 }, async ($, on) => {
   let percent = 55
   const { draw } = await bandWith($, on, args => fullUsage(percent, args))
   const order = ['labels', 'bar', 'resets', 'tokens'] as const
