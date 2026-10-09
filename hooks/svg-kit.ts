@@ -29,19 +29,35 @@ export function measure(text: string, isMono: boolean, size: number): number {
   }, 0)
 }
 
+// Keeps the characters that fit with an ellipsis after them, at least one; one pass, so a
+// long line costs no more than its length.
 export function fitText(text: string, width: number, isMono: boolean, size: number): string {
   if (measure(text, isMono, size) <= width) {
     return text
   }
 
-  const chars = [...text]
+  const room = width - measure('…', isMono, size)
+  let used = 0
+  let kept = ''
 
-  while (chars.length > 1 && measure(`${chars.join('')}…`, isMono, size) > width) {
-    chars.pop()
+  for (const char of text) {
+    used += measure(char, isMono, size)
+
+    if (used > room && kept !== '') {
+      break
+    }
+
+    kept += char
   }
 
-  return `${chars.join('')}…`
+  return `${kept}…`
 }
+
+// Alt text for a card that holds a whole file or block: a reader gets the first MAX_ALT
+// characters, the clipboard the rest.
+export const MAX_ALT = 4000
+
+export const capAlt = (text: string): string => (text.length > MAX_ALT ? `${text.slice(0, MAX_ALT)}…` : text)
 
 // The room a reply gives a card, from the width the desktop reports in cells of its code
 // font, kept to a range a card reads well at. The reported width runs wider than the
@@ -51,18 +67,17 @@ const PX_PER_COLUMN = 6.4
 export const cardWidth = (columns: number, min = 480, max = 1600): number =>
   Math.round(Math.min(max, Math.max(min, columns * PX_PER_COLUMN)))
 
-// Rows that rise in one after another, honouring reduced motion. Rows are visible by
-// default: the animation's `both` fill hides one only while its delay runs.
+// Rows that rise in one after another; `still()` holds them for reduced motion. Rows are
+// visible by default: the animation's `both` fill hides one only while its delay runs.
 export const MOTION = [
   '.rise{animation:rise .45s cubic-bezier(.2,.8,.2,1) both}',
   '.card{animation:fade .3s ease-out}',
   '@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1}}',
   '@keyframes fade{from{opacity:0}to{opacity:1}}',
-  '@media (prefers-reduced-motion:reduce){.rise,.card{animation:none;opacity:1}}',
 ].join('')
 
 // However many rows a card has, the last starts rising within this of the first.
-export const MAX_STAGGER_MS = 250
+const MAX_STAGGER_MS = 250
 
 export const staggerMs = (index: number, stepMs: number): number => Math.min(index * stepMs, MAX_STAGGER_MS)
 

@@ -32,7 +32,7 @@ const MARKS = {
   interrupted: '<circle cx="19" cy="19" r="4" stroke-width="1.8" stroke-dasharray="1.6 1.6"/>',
 } as const
 
-export type Mark = keyof typeof MARKS
+type Mark = keyof typeof MARKS
 
 // A tool's icon; while it runs, an arc circles it; a failed or interrupted one carries
 // its mark, the kind's icon shrunk to the top-left to make room.

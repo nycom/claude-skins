@@ -261,11 +261,8 @@ export const register: Register = on => {
     })
     // An `auto` theme follows the system's appearance as it changes mid-session.
     themeTimer?.cancel()
-    themeTimer = $.clock.every(THEME_TTL_MS, () => {
-      if (config.followsSystem) {
-        void readConfig($, config)
-      }
-    })
+    // Returns the read, so the tick's dispatch lasts until the theme is settled.
+    themeTimer = $.clock.every(THEME_TTL_MS, () => (config.followsSystem ? readConfig($, config) : undefined))
 
     return next(e)
   })

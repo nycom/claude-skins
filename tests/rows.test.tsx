@@ -628,7 +628,14 @@ test('an auto theme notices the system turning dark mid-session, asking it at mo
   expect(asked).toBe(1)
 
   await clock.advance(60_000)
-  expect(await bashColor('t3')).toBe('#ededed')
+  // The kit does not promise to wait for a timer's work, so let it finish before looking:
+  // the read asks the system, then repaints.
+  let color = await bashColor('t3')
+  for (let i = 0; i < 50 && color !== '#ededed'; i += 1) {
+    await clock.settle()
+    color = await bashColor(`t3-${i}`)
+  }
+  expect(color).toBe('#ededed')
   expect(asked).toBe(2)
 })
 

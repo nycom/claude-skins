@@ -6,6 +6,7 @@
     {
       "name": "skins",
       "source": "./",
+      "version": "0.2.0",
       "description": "Skins for Claude Code's transcript: themed tool rows, reply gutters and spinner words. /skin swaps them live."
     }
   ]
