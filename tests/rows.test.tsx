@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
+import { PX_PER_COLUMN } from '../hooks/svg-kit'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -1010,9 +1011,10 @@ async function bandWith($: Engine, on: On, usage: (args: { breakdown?: string })
     const band = await $.ui.mount(BAND(surface, false, columns))
     const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source
     const text = JSON.stringify(await band.drawn())
+    const width = ((await band.find({ type: 'Svg' })) as { props: { width: number } } | undefined)?.props.width ?? 0
     const hasCompact = (await band.find({ key: 'compact' })) !== undefined
     await band.unmount()
-    return { source: source ?? '', text, hasCompact }
+    return { source: source ?? '', text, hasCompact, width }
   }
 
   return { draw, asked }
@@ -1098,6 +1100,18 @@ test('a narrow band drops the breakdown labels, then the bar, then the resets, t
       expect(`${surface} ${reading}% ${[...seen].join(' | ')}`).toBe(`${surface} ${reading}% true,true,true,true | false,true,true,true | false,false,true,true | false,false,false,true | false,false,false,false`)
     }
   }
+})
+
+test('at 75% on a ~120 column terminal the rings, kept extras and the Compact controls fit the row', async ($, on) => {
+  const columns = 120
+  const { draw } = await bandWith($, on, args => fullUsage(75, args))
+  const { width, hasCompact } = await draw('desktop', columns)
+  // The row's padding and gap, then the nudge and the 'Compact now' button, as the band reserves them.
+  const controls = 5 + 2 + ('Compact now'.length + 6 + 2) + ('Context is 75% full'.length + 2)
+
+  expect(hasCompact).toBe(true)
+  expect(width).toBeGreaterThan(0)
+  expect(width + controls * PX_PER_COLUMN).toBeLessThanOrEqual(columns * PX_PER_COLUMN)
 })
 
 test('the extras redraw as the same image at the same readings, hold still under Reduce motion', async ($, on) => {

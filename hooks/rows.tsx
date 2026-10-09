@@ -2,7 +2,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, TurnStats } from '../types'
 import { formatDuration, formatMs } from './format'
-import { columnWidths, cutCell } from './markdown'
+import { columnWidths, cutCell, widthOf } from './markdown'
 import type { Segment, Table } from './markdown'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
@@ -10,7 +10,7 @@ import type { SpinnerMode } from './icons'
 import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
-import { cardWidth } from './svg-kit'
+import { PX_PER_COLUMN, cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
@@ -501,9 +501,6 @@ export const COMPACT_NUDGE = 70
 // (`c: Compact`); the desktop's button is pressed with the pointer.
 export const COMPACT_HOTKEY = 'c'
 
-// About how wide a terminal column is on the desktop, in pixels.
-const PX_PER_COLUMN = 8
-
 // What the band shows past the rings, by how many of its extras are kept: a narrow band
 // drops the breakdown's labels first, then its bar, then the resets, then the tokens.
 const EXTRAS = 4
@@ -538,7 +535,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
     const cells = view.breakdown === undefined ? [] : partCells(view.breakdown.parts)
     const names = view.breakdown?.isLabelled ? ` ${partNames(view.breakdown.parts).join(' · ')}` : ''
     const items = [...line.map(meter => meter.bar + meter.text), ...(cells.length > 0 ? [cells.map(cell => cell.cells).join('') + names] : [])]
-    const width = items.reduce((sum, item) => sum + item.length, 3 * (items.length - 1))
+    const width = items.reduce((sum, item) => sum + widthOf(item), 3 * (items.length - 1))
 
     if (kept === 0 || width <= room) {
       return (
@@ -563,8 +560,6 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
       )
     }
   }
-
-  return ''
 }
 
 // The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
@@ -587,16 +582,26 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
     <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
       {meterView(look, meters, parts, columns - reserved, starts, isOffered && isNudge)}
       <Box flexGrow={1} />
-      {isOffered && isNudge ? <Text color={palette.warn}>{nudge}</Text> : ''}
+      {isOffered && isNudge ? (
+        <Box flexShrink={0}>
+          <Text color={palette.warn} wrap="truncate-end">
+            {nudge}
+          </Text>
+        </Box>
+      ) : (
+        ''
+      )}
       {isOffered ? (
-        <Button
-          key="compact"
-          label={label}
-          {...(look.surface === 'terminal' ? { hotkey: COMPACT_HOTKEY } : {})}
-          plain
-          {...(isNudge ? { variant: 'primary' as const } : { dimColor: true })}
-          onPress={compact}
-        />
+        <Box flexShrink={0}>
+          <Button
+            key="compact"
+            label={label}
+            {...(look.surface === 'terminal' ? { hotkey: COMPACT_HOTKEY } : {})}
+            plain
+            {...(isNudge ? { variant: 'primary' as const } : { dimColor: true })}
+            onPress={compact}
+          />
+        </Box>
       ) : (
         ''
       )}

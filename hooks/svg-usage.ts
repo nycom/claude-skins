@@ -86,6 +86,7 @@ export function metersOf(usage: UsageSnap, now: number): Meter[] {
 }
 
 // The parts /context names, in a word each and a skin colour each; any other is `other`.
+// Cosmetic only: `kind` decides used or free, and a name not listed falls back to `other`.
 const PARTS: Readonly<Record<string, { label: string; slot: Slot }>> = {
   Messages: { label: 'msgs', slot: 'user' },
   'System tools': { label: 'tools', slot: 'run' },
