@@ -49,7 +49,7 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Site | Desktop app | Terminal |
 |---|---|---|
 | Tool calls | A line icon per kind, a spinning ring while it runs, a cross when it failed and a dotted ring when interrupted, lines changed and time taken | A node on the turn's rail with the same facts |
-| Edits | A diff card: file, `+N −M`, numbered changed lines in green and red, and a Copy button for the whole patch | Claude Code's own diff |
+| Edits | A diff card: file, `+N −M`, the first lines changed, numbered, in green and red, and a Copy diff button for the whole patch; the alt text carries the patch too, capped at 4000 characters, with paths relative to the session (`a/` and `b/`) | Claude Code's own diff |
 | Shell commands | A terminal card: status pill, output with stderr apart, long output folded, and a Copy button for the output | Claude Code's own output |
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
@@ -59,10 +59,18 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
 
-Every card rises in row by row and respects reduced motion, as do the icons; Claude Code's Reduce motion setting holds every card and icon still and turns the terminal shimmer off. A skin only changes what is drawn: the stored
+Every card rises in row by row, the last row starting within a quarter second of the first. Reduced
+motion holds the icons, the cards and the band's rings still, whether it is the system's setting or
+Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each Copy button says what it
+copies: table, code, diff or output. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
 Claude Code's own drawing. The default skin is **noir**, black and white. Cards have no background of
-their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette. With the `auto` theme it
+their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette,
+and a skin you made from a built-in keeps that skin's light palette. Every role in every skin reads at
+4.5:1 or better on Claude Code's dark backgrounds, where the muted text was lifted wherever it fell short, and
+on its light one, where the palettes derived from the dark ones are checked and deepened until they do.
+On a diff, line numbers and `+`/`−` are drawn in the text colour so they stay readable on the tint, and
+the band's rings are a faint track under a fill that holds 3:1 against it. With the `auto` theme it
 follows your terminal's background (`COLORFGBG`) or, failing that, the system's light or dark mode, checked again every minute.
 Set `SKINS_THEME=light` or `SKINS_THEME=dark` to choose yourself, for example when you launch with
 `claude --settings '{"theme":"dark"}'`, which skins cannot see.
