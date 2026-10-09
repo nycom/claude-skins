@@ -10,7 +10,8 @@ import { diffLines, diffSvg, hunksOf } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
 import { limitLabel, meterColor, metersOf, usageSvg } from '../hooks/svg-usage'
-import { deepen, isLightTheme, resolveLight, toLight } from '../hooks/light'
+import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
+import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
 import tokyoNight from '../hooks/themes/tokyo-night'
@@ -308,4 +309,31 @@ test('a pinned folder keeps its own prefs, others follow the default', async () 
   expect(prefsFor('/c', folders, DEFAULT_PREFS)).toBe(DEFAULT_PREFS)
   expect(Object.keys(withoutFolder(withFolder(folders, '/c', pinned), '/a'))).toEqual(['/b', '/c'])
   expect(parseFolders('junk', NAMES)).toEqual({})
+})
+
+test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async () => {
+  const roles = ['read', 'write', 'run', 'search', 'web', 'mcp', 'other', 'user', 'fg', 'muted', 'ok', 'err', 'warn'] as const
+  const made = resolveSkin('my-noir', { 'my-noir': { name: 'my-noir', label: 'x', base: 'noir', palette: {}, spinner: [], done: [] } })
+  const dark = ['#262624', '#1f1e1d']
+
+  for (const skin of [...SKINS, ...(made === undefined ? [] : [made])]) {
+    for (const role of roles) {
+      for (const bg of dark) {
+        expect(`${skin.name} dark ${role} ${contrast(skin.palette[role], bg) >= 4.5}`).toBe(`${skin.name} dark ${role} true`)
+      }
+
+      const light = forTheme(skin, true).palette[role]
+
+      expect(`${skin.name} light ${role} ${contrast(light, LIGHT_BG) >= 4.5}`).toBe(`${skin.name} light ${role} true`)
+    }
+  }
+})
+
+test('a made skin keeps its base skin\'s light palette, and derives the slots it changed', async () => {
+  const custom = { mine: { name: 'mine', label: 'Mine', base: 'noir', palette: { read: '#ffffff' }, spinner: [], done: [] } }
+  const light = resolveSkin('mine', custom)?.light
+
+  expect(light?.write).toBe('#111111')
+  expect(light?.read).not.toBe('#111111')
+  expect(contrast(light?.read ?? '#ffffff', LIGHT_BG)).toBeGreaterThanOrEqual(4.5)
 })
