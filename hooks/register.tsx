@@ -1,7 +1,7 @@
 import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-code'
 
-import type { CustomSkin, Prefs, SkinSlot, TurnStats, UsageSnap } from '../types'
+import type { CustomSkin, PanelTheme, Prefs, SkinSlot, TurnStats, UsageSnap } from '../types'
 import { DEFAULT_PREFS, parsePrefs, runSkinCommand, TOGGLES } from './command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from './custom'
 import { forTheme, resolveLight } from './light'
@@ -55,6 +55,7 @@ const imagesAtom = atom({ plugin: 'skins', key: 'images' } as const, false)
 const usageAtom = atom({ plugin: 'skins', key: 'usage' } as const, { context: null, limits: [] } as UsageSnap)
 const compactingAtom = atom({ plugin: 'skins', key: 'compacting' } as const, false)
 const pinnedAtom = atom({ plugin: 'skins', key: 'pinned' } as const, false)
+const themeAtom = atom({ plugin: 'skins', key: 'theme' } as const, null as PanelTheme | null)
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 
@@ -72,6 +73,28 @@ async function activeSkin($: EngineInterface): Promise<Active | null> {
   const skin = resolveSkin(prefs.skin, custom)
 
   return skin === undefined ? null : { prefs, skin: forTheme(skin, await read($, lightAtom)), custom }
+}
+
+// The drawn skin's colours for other mods' panels. Skins draw on the host's background,
+// so `surface` stands in for it. Each write redraws every reader, so only a change is written.
+async function publishTheme($: EngineInterface): Promise<void> {
+  const active = await activeSkin($)
+  const p = active?.skin.palette
+  const theme: PanelTheme | null =
+    p === undefined
+      ? null
+      : {
+          mode: (await read($, lightAtom)) ? 'light' : 'dark',
+          accent: p.user,
+          foreground: p.fg,
+          dim: p.muted,
+          muted: p.muted,
+          red: p.err,
+          selection: p.zebra,
+          background: p.surface,
+        }
+
+  if (JSON.stringify(await read($, themeAtom)) !== JSON.stringify(theme)) await update($, themeAtom, () => theme)
 }
 
 // The system's appearance, for an `auto` theme: macOS's AppleInterfaceStyle, else GNOME's
@@ -112,6 +135,7 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
 
   // Every write redraws every card that reads it, so the minute's poll writes only a change.
   if ((await read($, lightAtom)) !== isLight) await update($, lightAtom, () => isLight)
+  await publishTheme($)
 
   return { followsSystem: needsSystem, reducesMotion: rows.find(row => row.key === 'reduceMotion')?.value === true }
 }
@@ -241,6 +265,7 @@ async function runFolderCommand($: EngineInterface, word: string): Promise<strin
       await $.store.set('folders', withoutFolder(folders, folder))
       await update($, pinnedAtom, () => false)
       await update($, prefsAtom, () => fallback)
+      await publishTheme($)
 
       return `this folder follows the default: ${fallback.skin}`
     }
@@ -272,6 +297,7 @@ async function refreshUsage($: EngineInterface): Promise<void> {
 async function commit($: EngineInterface, state: DesignState): Promise<void> {
   await update($, customAtom, () => state.custom)
   await update($, prefsAtom, () => state.prefs)
+  await publishTheme($)
   await $.store.set('custom', state.custom)
   await savePrefs($, state.prefs)
 }

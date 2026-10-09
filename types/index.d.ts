@@ -50,6 +50,10 @@ export type UsageSnap = {
   parts?: { name: string; tokens: number }[]
 }
 
+// The selected skin's colours for other mods' panels, in Omarchy colors.toml terms:
+// `dim` is secondary text, `muted` a border tone. null while the skin is 'off'.
+export type PanelTheme = { mode: 'dark' | 'light'; accent: string; foreground: string; dim: string; muted: string; red: string; selection: string; background: string }
+
 // What one turn did, shown in its footer.
 export type TurnStats = { tools: number; added: number; removed: number }
 
@@ -68,6 +72,7 @@ declare module 'claude-code' {
       images: StateFamily<boolean>
       compacting: boolean
       pinned: boolean
+      theme: PanelTheme | null
     }
   }
 }

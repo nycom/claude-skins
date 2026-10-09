@@ -1123,3 +1123,43 @@ test('the extras redraw as the same image at the same readings, hold still under
   expect((await draw('desktop')).source).toBe(first)
   expect(first.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('')).toContain('*{animation:none!important}')
 })
+
+test('the selected skin is published for other mods’ panels, and follows /skin and the light theme', async ($, on) => {
+  stubEngine(on)
+  let theme = 'dark'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'enum', value: theme, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('config.set', ($, e) => ((theme = String(e.value)), { value: e.value }) as never)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  // Each write redraws other mods' readers, so it is written only when it changes.
+  const writes: unknown[] = []
+  on('state.set', ($, e, next) => {
+    if (e.plugin === 'skins' && e.key === 'theme') writes.push(e.value)
+    return next(e)
+  })
+  const published = async () => writes.at(-1) as Record<string, string> | null | undefined
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect((await published())?.foreground).toBeDefined()
+
+  await runSkin($, 'tokyo-night')
+  await runSkin($, 'rail off')
+  expect(writes).toHaveLength(2)
+  expect(await published()).toEqual({
+    mode: 'dark',
+    accent: '#7aa2f7',
+    foreground: '#c0caf5',
+    dim: '#878daf',
+    muted: '#878daf',
+    red: '#f7768e',
+    selection: '#1d2030',
+    background: '#1f2335',
+  })
+
+  await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { kind: 'engine' }, origin: { kind: 'composer' } } as never)
+  expect(await published()).toMatchObject({ mode: 'light', foreground: '#1f1f1f', background: '#ffffff' })
+
+  await runSkin($, 'off')
+  expect(await published()).toBeNull()
+})
