@@ -19,12 +19,30 @@ const SPIN = [
   '@keyframes spin{to{transform:rotate(360deg)}}',
 ].join('')
 
-const svg = (size: number, style: string, body: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24"><style>${style}</style>${body}</svg>`
+// With reduced motion every icon holds still in its resting pose: the arc, the orb, the
+// bars and the dots stay drawn, so the state still shows.
+const STILL = '@media (prefers-reduced-motion:reduce){*{animation:none!important}}'
 
-// A tool's icon; while it runs, an arc circles it.
-export function toolIcon(kind: Kind, color: string, isRunning: boolean): string {
+const svg = (size: number, style: string, body: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24"><style>${style}${STILL}</style>${body}</svg>`
+
+// Marks in the icon's bottom-right corner, so a status reads by shape as well as colour:
+// a cross for a failed call, a dotted ring for an interrupted one.
+const MARKS = {
+  failed: '<path d="M16.5 16.5l5 5M21.5 16.5l-5 5" stroke-width="2.2"/>',
+  interrupted: '<circle cx="19" cy="19" r="4" stroke-width="1.8" stroke-dasharray="1.6 1.6"/>',
+} as const
+
+export type Mark = keyof typeof MARKS
+
+// A tool's icon; while it runs, an arc circles it; a failed or interrupted one carries
+// its mark, the kind's icon shrunk to the top-left to make room.
+export function toolIcon(kind: Kind, color: string, isRunning: boolean, mark?: Mark): string {
   const stroke = `<g fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${PATHS[kind]}</g>`
+
+  if (mark !== undefined) {
+    return svg(16, '', `<g transform="scale(.66)">${stroke}</g><g fill="none" stroke="${color}" stroke-linecap="round">${MARKS[mark]}</g>`)
+  }
 
   if (!isRunning) {
     return svg(16, '', stroke)

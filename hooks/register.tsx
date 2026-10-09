@@ -36,6 +36,10 @@ const CLIP_HEAD = 8
 const CLIP_TAIL = 4
 const FRAME_MS = 90
 const KEPT_TURNS = 40
+// ponytail: an `auto` theme asks the system again this often (drawing cannot write state,
+// so a timer does it), so a mid-session appearance flip shows within a minute; a watcher
+// on the OS's appearance notification would make it instant.
+const THEME_TTL_MS = 60_000
 
 const prefsAtom = atom({ plugin: 'skins', key: 'prefs' } as const, DEFAULT_PREFS)
 const customAtom = atom({ plugin: 'skins', key: 'custom' } as const, {})
@@ -91,7 +95,9 @@ async function systemDark($: EngineInterface): Promise<boolean | undefined> {
 
 // Claude Code's own theme decides whether skins draw for a light or a dark background:
 // `SKINS_THEME` first, then the theme setting, and for `auto` the terminal and the system.
-async function refreshTheme($: EngineInterface): Promise<void> {
+// Says whether the system decided, so it is asked again later, and whether Claude Code's
+// Reduce motion setting is on.
+async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolean; reducesMotion: boolean }> {
   const rows = await $.config.list()
   const hints = {
     override: await $.env.get('SKINS_THEME'),
@@ -103,6 +109,15 @@ async function refreshTheme($: EngineInterface): Promise<void> {
   const isLight = resolveLight({ ...hints, systemDark: needsSystem ? await systemDark($) : undefined })
 
   await update($, lightAtom, () => isLight)
+
+  return { followsSystem: needsSystem, reducesMotion: rows.find(row => row.key === 'reduceMotion')?.value === true }
+}
+
+// What the settings said when last read.
+type ConfigMemo = { followsSystem: boolean; reducesMotion: boolean }
+
+async function readConfig($: EngineInterface, memo: ConfigMemo): Promise<void> {
+  Object.assign(memo, await refreshTheme($))
 }
 
 // Every surface's element table names Svg, but the terminal draws it as nothing, so
@@ -216,6 +231,8 @@ export const register: Register = on => {
   let ticker: Timer | undefined
   // The width the last reply was drawn at, shown by /skin list to tune table sizing.
   let lastColumns: number | undefined
+  const config: ConfigMemo = { followsSystem: false, reducesMotion: false }
+  let themeTimer: Timer | undefined
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -231,13 +248,20 @@ export const register: Register = on => {
     })
     await load($)
     await refreshUsage($)
-    await refreshTheme($)
+    await readConfig($, config)
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
     ticker = $.clock.every(FRAME_MS, () => {
       if (isWorking) {
         void update($, frameAtom, frame => frame + 1)
+      }
+    })
+    // An `auto` theme follows the system's appearance as it changes mid-session.
+    themeTimer?.cancel()
+    themeTimer = $.clock.every(THEME_TTL_MS, () => {
+      if (config.followsSystem) {
+        void readConfig($, config)
       }
     })
 
@@ -247,7 +271,7 @@ export const register: Register = on => {
   // /clear, /resume and /branch reset $.state to its defaults and skip session.start.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await load($)
-    await refreshTheme($)
+    await readConfig($, config)
 
     return next(e)
   })
@@ -264,8 +288,8 @@ export const register: Register = on => {
   on('config.set', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.key === 'theme') {
-      await refreshTheme($)
+    if (e.key === 'theme' || e.key === 'reduceMotion') {
+      await readConfig($, config)
     }
 
     return result
@@ -549,7 +573,8 @@ reply width: ${lastColumns} columns`
 
     const word = pick(active.skin.spinner, e.props.word) ?? e.props.word
 
-    if (!active.prefs.shimmer || e.props.message !== null) {
+    // Claude Code's Reduce motion keeps its own still spinner, in the skin's word.
+    if (!active.prefs.shimmer || config.reducesMotion || e.props.message !== null) {
       return next({ ...e, props: { ...e.props, word } })
     }
 

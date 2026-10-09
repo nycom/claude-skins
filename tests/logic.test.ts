@@ -204,6 +204,16 @@ test('a vector table stays within its width and escapes what it draws', async ()
   expect(card.source).toContain('prefers-reduced-motion')
 })
 
+test('a long table rises in within a quarter second, its rows visible without the animation', async () => {
+  const rows = Array.from({ length: 40 }, (_, i) => [`row ${i}`])
+  const card = tableSvg({ kind: 'table', header: ['a'], align: ['left'], rows }, tokyoNight.palette, 700)
+  const delays = [...card.source.matchAll(/animation-delay:(\d+)ms/g)].map(match => Number(match[1]))
+
+  expect(delays.length).toBe(40)
+  expect(Math.max(...delays) - Math.min(...delays)).toBeLessThanOrEqual(250)
+  expect(card.source).not.toContain('.row{opacity:0')
+})
+
 test('a patch numbers its lines on each side and marks the gap between hunks', async () => {
   const lines = diffLines([
     { oldStart: 10, newStart: 10, lines: [' a', '-b', '+c', '+d'] },
@@ -230,7 +240,8 @@ test('a new file with an empty patch shows its content as added lines', async ()
   const card = diffSvg(diff!, 'a.ts', tokyoNight.palette, 600)
 
   expect(card.source).toContain('new file')
-  expect(card.alt).toBe('a.ts: +2 −0')
+  // The alt carries the whole patch, as Copy does, since the card cuts long lines and stops at 30.
+  expect(card.alt).toBe('a.ts: +2 −0\n--- /dev/null\n+++ b//w/a.ts\n@@ -0,0 +1,2 @@\n+x\n+y')
 })
 
 test('shell output loses its colour codes, keeps stderr apart and folds the middle', async () => {
