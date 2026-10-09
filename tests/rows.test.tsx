@@ -3,7 +3,6 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
-import { BAND_PX_PER_COLUMN } from '../hooks/svg-kit'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -1123,25 +1122,18 @@ test('a narrow band drops the breakdown labels, then the bar, then the resets, t
   }
 })
 
-test('on a desktop band with room for them, the breakdown keeps its labels', async ($, on) => {
-  const { draw } = await bandWith($, on, args => fullUsage(48, args))
-  // 110 columns of the desktop's code font is about 880px, and the band with every extra about 740px.
-  const { source } = await draw('desktop', 110)
-
-  expect(source).toContain('msgs 61%')
-  expect(source).toContain('tools 22%')
-})
-
 test('at 75% on a ~120 column terminal the rings, kept extras and the Compact controls fit the row', async ($, on) => {
   const columns = 120
   const { draw } = await bandWith($, on, args => fullUsage(75, args))
   const { width, hasCompact } = await draw('desktop', columns)
   // The row's padding and gap, then the nudge and the 'Compact now' button, as the band reserves them.
   const controls = 5 + 2 + ('Compact now'.length + 6 + 2) + ('Context is 75% full'.length + 2)
+  // A column no narrower than the cards' calibrated 6.4px, so the row fits at any code font from there up.
+  const px = 6.4
 
   expect(hasCompact).toBe(true)
   expect(width).toBeGreaterThan(0)
-  expect(width + controls * BAND_PX_PER_COLUMN).toBeLessThanOrEqual(columns * BAND_PX_PER_COLUMN)
+  expect(width + controls * px).toBeLessThanOrEqual(columns * px)
 })
 
 test('the extras redraw as the same image at the same readings, hold still under Reduce motion', async ($, on) => {

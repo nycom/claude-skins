@@ -62,12 +62,7 @@ export const capAlt = (text: string): string => (text.length > MAX_ALT ? `${text
 // The room a reply gives a card, from the width the desktop reports in cells of its code
 // font, kept to a range a card reads well at. The reported width runs wider than the
 // reply column, so this errs small: a card that fits beats one that runs off the edge.
-const PX_PER_COLUMN = 6.4
-
-// One column of the band above the prompt: the advance of the desktop's code font. The band's
-// `bodyColumns` is its own box over that advance, so it needs none of a reply's margin (6.4 is
-// this less a fifth), and the band's extras are kept wherever they fit.
-export const BAND_PX_PER_COLUMN = 8
+export const PX_PER_COLUMN = 6.4
 
 export const cardWidth = (columns: number, min = 480, max = 1600): number =>
   Math.round(Math.min(max, Math.max(min, columns * PX_PER_COLUMN)))

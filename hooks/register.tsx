@@ -674,6 +674,8 @@ reply width: ${lastColumns} columns`
     const { Box } = look.ui
     // With no mod's row above, what comes back is the engine's own band, by reference, which
     // draws nothing without a survey; it is left out, so no empty row or gap sits above the rings.
+    // ponytail: only that bare pass-through is known to draw nothing; a mod's own Box around it
+    // may be its padding, border or height, so it keeps the gap. Look inside if a mod wraps it.
     const theirs = await next(e)
     const above = theirs.type === 'engine' ? null : theirs
     // Compacting mid-turn would cut the turn's own context out from under it.

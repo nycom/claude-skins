@@ -301,6 +301,8 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
   ])
   expect(meterColor(85, tokyoNight.palette)).toBe(tokyoNight.palette.warn)
   expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
+  // The ring reads `tmrw`; a reader hears the word.
+  expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
 })
 
 test('token counts read compactly, and a reset reads as a time today, tomorrow or on a weekday', async () => {
@@ -320,6 +322,14 @@ test('token counts read compactly, and a reset reads as a time today, tomorrow o
   const lastOfOctober = new Date(2026, 9, 31, 22, 0).getTime()
   expect(resetLabel(new Date(2026, 10, 1, 9, 0).toISOString(), lastOfOctober)).toBe('tmrw 9:00am')
   expect(resetLabel(new Date(2026, 10, 3, 9, 30).toISOString(), lastOfOctober)).toBe('Tue 9:30am')
+  // A week off falls on today's weekday, so it says which one; six days off is the coming weekday.
+  const fridayMorning = new Date(2026, 9, 9, 9, 30).getTime()
+  expect(resetLabel(new Date(2026, 9, 16, 9, 0).toISOString(), fridayMorning)).toBe('next Fri 9:00am')
+  expect(resetLabel(new Date(2026, 9, 15, 9, 0).toISOString(), fridayMorning)).toBe('Thu 9:00am')
+  // A reset already gone, seen before the next reading, names no time: the window has reset.
+  expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), new Date(2026, 9, 10, 9, 0).getTime())).toBeUndefined()
+  expect(resetLabel(new Date(2026, 9, 9, 11, 0).toISOString(), now)).toBeUndefined()
+  expect(resetLabel(new Date(now).toISOString(), now)).toBeUndefined()
   expect(resetLabel(undefined, now)).toBeUndefined()
   expect(resetLabel('soon', now)).toBeUndefined()
 

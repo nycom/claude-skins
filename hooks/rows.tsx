@@ -10,7 +10,7 @@ import type { SpinnerMode } from './icons'
 import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
-import { BAND_PX_PER_COLUMN, cardWidth } from './svg-kit'
+import { PX_PER_COLUMN, cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
@@ -524,7 +524,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
       const Svg = look.svg
       const built = usageSvg(view.meters, palette, starts, isPulsing, view.breakdown)
 
-      if (kept === 0 || built.width <= room * BAND_PX_PER_COLUMN) {
+      if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
         return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
       }
 

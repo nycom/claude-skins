@@ -214,7 +214,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
     width,
     height,
     alt: [
-      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note})`}`).join(', '),
+      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note.replace(/^tmrw/, 'tomorrow')})`}`).join(', '),
       ...(bar === '' || breakdown === undefined ? [] : [`context holds ${partNames(breakdown.parts).join(', ')}`]),
     ].join('; '),
   }
