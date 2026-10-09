@@ -4,7 +4,7 @@ import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-cod
 import type { CustomSkin, PanelTheme, Prefs, SkinSlot, TurnStats, UsageSnap } from '../types'
 import { DEFAULT_PREFS, parsePrefs, runSkinCommand, TOGGLES } from './command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from './custom'
-import { forTheme, resolveLight } from './light'
+import { forTheme, mix, resolveLight } from './light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from './folders'
 import { DESIGN_TOOL, runDesign } from './designer'
 import type { DesignState } from './designer'
@@ -76,7 +76,9 @@ async function activeSkin($: EngineInterface): Promise<Active | null> {
 }
 
 // The drawn skin's colours for other mods' panels. Skins draw on the host's background,
-// so `surface` stands in for it. Each write redraws every reader, so only a change is written.
+// so `surface` stands in for it; a quarter of the accent over it is a highlight body text
+// still reads on (at least 5:1 for every built-in skin, light or dark). Each write redraws
+// every reader, so only a change is written.
 async function publishTheme($: EngineInterface): Promise<void> {
   const active = await activeSkin($)
   const p = active?.skin.palette
@@ -90,7 +92,7 @@ async function publishTheme($: EngineInterface): Promise<void> {
           dim: p.muted,
           muted: p.muted,
           red: p.err,
-          selection: p.zebra,
+          selection: mix(p.surface, p.user, 0.25),
           background: p.surface,
         }
 

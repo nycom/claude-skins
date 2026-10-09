@@ -1153,12 +1153,12 @@ test('the selected skin is published for other mods’ panels, and follows /skin
     dim: '#878daf',
     muted: '#878daf',
     red: '#f7768e',
-    selection: '#1d2030',
+    selection: '#364366',
     background: '#1f2335',
   })
 
   await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { kind: 'engine' }, origin: { kind: 'composer' } } as never)
-  expect(await published()).toMatchObject({ mode: 'light', foreground: '#1f1f1f', background: '#ffffff' })
+  expect(await published()).toMatchObject({ mode: 'light', foreground: '#1f1f1f', selection: '#d0d6e1', background: '#ffffff' })
 
   await runSkin($, 'off')
   expect(await published()).toBeNull()
