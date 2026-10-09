@@ -4,6 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
 import { PX_PER_COLUMN } from '../hooks/svg-kit'
+import { ICONS } from '../hooks/skin'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -862,6 +863,17 @@ test('a desktop table card spans its columns: Copy sits under the card, not in a
   expect(overlays(await ui.find({ type: 'Box' }))).toBe(0)
   await ui.press({ key: 'copy-0' })
   expect(copied).toEqual(['| Client | Where |\n| --- | --- |\n| Robot | Pi |'])
+  await ui.unmount()
+})
+
+test('a desktop table card copies with a dim one-glyph icon, ascii in ascii mode', async ($, on) => {
+  stubEngine(on)
+  on('ui.copy', () => ({ value: { isCopied: true } }))
+  const ui = await $.ui.mount(desktopReply('icon-tb', '| A | B |\n| --- | --- |\n| 1 | 2 |'))
+  const button = (await ui.find({ type: 'Button' })) as { props: { label: string; plain?: boolean; dimColor?: boolean } }
+
+  expect(button.props).toMatchObject({ label: '⧉', plain: true, dimColor: true })
+  expect(ICONS.ascii.copy).toBe('[copy]')
   await ui.unmount()
 })
 

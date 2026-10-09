@@ -67,8 +67,8 @@ The band's rings grow from the reading they last showed, and only the rings that
 after a change the band settles still, so nothing replays. The context bar never animates. Its parts
 are the local estimate /context makes, which sends no requests, read whenever the band's numbers refresh. Reduced motion holds the icons, the cards,
 the band's rings and the jog rings' chase still, whether it is the system's setting or
-Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each Copy button says what it
-copies: table, code, diff or output. A skin only changes what is drawn: the stored
+Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each card's copy button is the
+icon ⧉ (`[copy]` with ASCII icons), dim until hovered or focused. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
 Claude Code's own drawing. The default skin is **noir**, black and white. Cards have no background of
 their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette,

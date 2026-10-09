@@ -318,7 +318,7 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
 // A card drawn as an image, with its Copy button laid over the top-right corner the card
 // left free. The image cannot be pressed, so the button is a real one on top of it; the
 // box hugs the image so the corner is the card's, not the column's.
-function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string, label: string) {
+function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string) {
   const { Box, Button } = look.ui
   const copy = look.copy
 
@@ -329,7 +329,7 @@ function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt:
         ''
       ) : (
         <Box position="absolute" top={1} right={3}>
-          <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
+          <Button key={key} label={look.icons.copy} plain dimColor onPress={() => copy(text)} />
         </Box>
       )}
     </Box>
@@ -363,16 +363,16 @@ function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, k
 const tableMarkdown = (table: Table): string =>
   [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
 
-// A table's Copy button; nothing where nothing can copy.
+// A table's copy button, an icon; nothing where nothing can copy.
 function copyButton(look: Look, key: string, text: string) {
   const { Button } = look.ui
   const copy = look.copy
 
-  return copy === undefined ? undefined : <Button key={key} label="Copy table" plain dimColor onPress={() => copy(text)} />
+  return copy === undefined ? undefined : <Button key={key} label={look.icons.copy} plain dimColor onPress={() => copy(text)} />
 }
 
-// A small Copy button under a card or block, flush right; nothing where nothing can copy.
-export function copyRow(look: Look, key: string, text: string, label = 'Copy code') {
+// A small copy icon button under a card or block, flush right; nothing where nothing can copy.
+export function copyRow(look: Look, key: string, text: string) {
   const { Box, Button } = look.ui
   const copy = look.copy
 
@@ -382,7 +382,7 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy cod
 
   return (
     <Box flexDirection="row" justifyContent="flex-end">
-      <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
+      <Button key={key} label={look.icons.copy} plain dimColor onPress={() => copy(text)} />
     </Box>
   )
 }
@@ -492,19 +492,19 @@ export function askBand(look: Look, headers: readonly string[]) {
 }
 
 export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code') {
-  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code, 'Copy code')
+  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code)
 }
 
 // The card shows the first lines; Copy gives the whole patch.
 export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPath: string, columns: number) {
-  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input, shownPath), 'Copy diff')
+  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input, shownPath))
 }
 
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number) {
   const text = [output.stdout, output.stderr].filter(part => part.trim() !== '').join('\n')
   const withCopy = text === '' ? { ...look, copy: undefined } : look
 
-  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text, 'Copy output')
+  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text)
 }
 
 // A letter, which presses only while the band holds the focus (ctrl+x tab), never from
