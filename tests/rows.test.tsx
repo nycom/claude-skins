@@ -896,10 +896,10 @@ test('the context ring grows from its last reading, and a redraw at the same rea
   const settled = await ring()
   expect(settled).not.toContain('@keyframes fill')
   expect(await ring()).toBe(settled)
-  // The fill arc sits on its track: one centre per ring.
+  // The fill arc and its segments sit on its track: one centre per ring.
   const centres = [...grown.matchAll(/<circle[^>]* cx="([\d.]+)" cy="([\d.]+)"/g)].map(m => `${m[1]},${m[2]}`)
-  expect(centres.length).toBe(2)
-  expect(centres[1]).toBe(centres[0])
+  expect(centres.length).toBeGreaterThan(2)
+  expect(new Set(centres).size).toBe(1)
 })
 
 test('a band left on screen settles by itself once its rings have grown', async ($, on) => {
@@ -922,7 +922,7 @@ test('a band left on screen settles by itself once its rings have grown', async 
   await band.unmount()
 })
 
-test('from 70% with Compact offered the context ring pulses, unless motion is reduced', async ($, on) => {
+test('the context ring chases faster in warn from 70% with Compact offered, and holds still under Reduce motion', async ($, on) => {
   mock.clock(on)
   let percent = 65
   let reduces = false
@@ -944,11 +944,11 @@ test('from 70% with Compact offered the context ring pulses, unless motion is re
   }
   const held = (source: string) => source.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
 
-  expect(await ring()).not.toContain('pulse')
+  expect(await ring()).toContain('animation:jog 3s ease-in-out')
   percent = 72
   const nudged = await ring()
-  expect(nudged).toContain('@keyframes pulse{')
-  expect(nudged).toContain('animation:pulse 2s ease-in-out infinite')
+  expect(nudged).toContain('@keyframes jog{')
+  expect(nudged).toContain('animation:jog 2.4s ease-in-out')
   expect(held(nudged)).toBe(false)
   reduces = true
   expect(held(await ring())).toBe(true)

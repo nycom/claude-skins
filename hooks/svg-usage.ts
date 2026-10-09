@@ -137,14 +137,29 @@ export const meterColor = (percent: number, palette: Palette): string =>
 // the page alike in every skin.
 export const TRACK_OPACITY = 0.2
 
-// A soft halo that breathes out from the context ring while the band nudges to compact.
-const PULSE = '@keyframes pulse{50%{stroke-width:6px;stroke-opacity:.35}}'
+// From this full, the band offers Compact; below it the button stays hidden.
+export const COMPACT_SHOW = 50
+
+// From this full, the band suggests compacting and makes it the main action.
+export const COMPACT_NUDGE = 70
+
+// The context ring is a CDJ's jog ring: twelve segments, and the unlit ones up to 12 o'clock
+// light one after another, like a deck's track-end warning, faster and brighter as the context
+// fills. From 90% only the last is left, blinking; from 97% the arc dims on the same beat.
+const SEGMENTS = 12
+const JOG_TIERS: readonly { from: number; slot: 'user' | 'warn' | 'err'; seconds: number; peak: number }[] = [
+  { from: 90, slot: 'err', seconds: 1.2, peak: 0.75 },
+  { from: COMPACT_NUDGE, slot: 'warn', seconds: 2.4, peak: 0.75 },
+  { from: COMPACT_SHOW, slot: 'user', seconds: 3, peak: 0.5 },
+  { from: 0, slot: 'user', seconds: 4, peak: 0.35 },
+]
+const JOG_DIM = 97
 
 const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${meter.note === undefined ? '' : ` · ${meter.note}`}`
 
 // `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
 // The breakdown bar follows the rings; it never animates, so a redraw is the same image.
-export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], isPulsing = false, breakdown?: Breakdown): { source: string; width: number; height: number; alt: string } {
+export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], breakdown?: Breakdown): { source: string; width: number; height: number; alt: string } {
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
   const lefts: number[] = []
@@ -161,19 +176,44 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
       const x = (lefts[i] ?? 0) + RING_R + 4
       const filled = (circumference * meter.percent) / 100
       const start = (circumference * (starts[i] ?? 0)) / 100
-      const color = meterColor(meter.percent, palette)
+      const jog = meter.label === 'context' ? JOG_TIERS.find(tier => meter.percent >= tier.from) : undefined
+      const color = jog === undefined ? meterColor(meter.percent, palette) : palette[jog.slot]
       // Each ring has its own keyframes, from where it was to where it is; none when it did not move.
-      const grow = start === filled ? '' : ` style="animation:fill${i} .9s cubic-bezier(.2,.8,.2,1)"`
+      const moves = [
+        ...(start === filled ? [] : [`fill${i} .9s cubic-bezier(.2,.8,.2,1)`]),
+        ...(jog !== undefined && meter.percent >= JOG_DIM ? [`dim ${jog.seconds}s ease-in-out infinite`] : []),
+      ]
+      const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
       ramps.push(start === filled ? '' : `@keyframes fill${i}{from{stroke-dasharray:${start} ${circumference}}}`)
 
-      const halo = isPulsing && meter.label === 'context'
-        ? `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-opacity="0" stroke-width="2.5" style="animation:pulse 2s ease-in-out infinite"/>`
-        : ''
+      // A jog ring's arc ends square: a round cap would poke past a gap into the next segment.
+      const ring = [
+        `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
+        `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5"${jog === undefined ? ' stroke-linecap="round"' : ''} stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
+      ]
+
+      if (jog !== undefined) {
+        // A segment is unlit while the arc covers less than half of it; the last one always counts.
+        const first = Math.min(SEGMENTS - 1, Math.round((meter.percent * SEGMENTS) / 100))
+        const count = SEGMENTS - first
+        // Each lights a tenth of a cycle after the one before, closer when that would run past the cycle.
+        const step = Math.min(jog.seconds / 10, (jog.seconds * 0.55) / Math.max(1, count - 1))
+        const segment = circumference / SEGMENTS
+        ramps.push(`@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, meter.percent >= JOG_DIM ? '@keyframes dim{50%{opacity:.6}}' : '')
+        // An 8° gap centred on every hour; held still, only the next segment up shows, at .4.
+        ring.unshift(
+          `<mask id="jog${i}" maskUnits="userSpaceOnUse" x="${x - 12}" y="${CY - 12}" width="24" height="24"><circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(segment * 22) / 30} ${(segment * 8) / 30}" transform="rotate(-86 ${x} ${CY})"/></mask><g mask="url(#jog${i})">`,
+        )
+        ring.push(
+          ...Array.from({ length: count }, (_, n) =>
+            `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${segment} ${circumference}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${x} ${CY})" style="animation:jog ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
+          ),
+          '</g>',
+        )
+      }
 
       return [
-        halo,
-        `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
-        `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
+        ...ring,
         `<text x="${x + RING_R + 7}" y="${CY + 4}" font-size="12"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}${meter.note === undefined ? '' : ` · ${escape(meter.note)}`}</tspan></text>`,
       ].join('')
     })
@@ -205,7 +245,6 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
   const style = [
     `text{font-family:${FONT}}`,
     ...ramps,
-    ...(isPulsing ? [PULSE] : []),
     still(),
   ].join('')
 

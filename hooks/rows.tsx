@@ -14,7 +14,7 @@ import { PX_PER_COLUMN, cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { partCells, partNames, usageLine, usageSvg } from './svg-usage'
+import { COMPACT_NUDGE, COMPACT_SHOW, partCells, partNames, usageLine, usageSvg } from './svg-usage'
 import type { Breakdown, Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
@@ -490,12 +490,6 @@ export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, i
   return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text, 'Copy output')
 }
 
-// From this full, the band offers Compact; below it the button stays hidden.
-export const COMPACT_SHOW = 50
-
-// From this full, the band suggests compacting and makes it the main action.
-export const COMPACT_NUDGE = 70
-
 // A letter, which presses only while the band holds the focus (ctrl+x tab), never from
 // the prompt: Compact cannot be undone, so typing cannot set it off. The terminal shows it
 // (`c: Compact`); the desktop's button is pressed with the pointer.
@@ -513,7 +507,7 @@ function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: numb
 }
 
 // The meters with as many extras as fit `room` columns; with none, whatever their width.
-function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[] = [], isPulsing = false) {
+function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[] = []) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
@@ -522,7 +516,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 
     if (look.svg !== undefined) {
       const Svg = look.svg
-      const built = usageSvg(view.meters, palette, starts, isPulsing, view.breakdown)
+      const built = usageSvg(view.meters, palette, starts, view.breakdown)
 
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
         return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
@@ -580,7 +574,7 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
   return (
     // The right edge stays clear: the band draws its own collapse mark ([-]) there.
     <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      {meterView(look, meters, parts, columns - reserved, starts, isOffered && isNudge)}
+      {meterView(look, meters, parts, columns - reserved, starts)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? (
         <Box flexShrink={0}>

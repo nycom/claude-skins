@@ -346,6 +346,54 @@ test('the breakdown keeps what fills the window, largest first, as shares of it'
   expect(partsOf([])).toEqual([])
 })
 
+test('the context ring is a jog ring whose unlit segments chase toward 12, faster and hotter as it fills', async () => {
+  const { palette } = tokyoNight
+  const circumference = 2 * Math.PI * 8
+  const band = (context: number) => usageSvg([{ label: 'context', percent: context }, { label: '5h', percent: 19 }, { label: '7d', percent: 23 }], palette).source
+  const chase = (context: number) => {
+    const heads = [...band(context).matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog ([\d.]+)s/g)]
+    return { angles: heads.map(m => Number(m[3])), colors: [...new Set(heads.map(m => m[1]))], seconds: [...new Set(heads.map(m => Number(m[4])))], resting: heads.map(m => m[2]) }
+  }
+  const arc = (source: string) => source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1]
+
+  const warned = band(74)
+  expect(warned).toContain('<mask id="jog0"')
+  expect(warned).toContain('<g mask="url(#jog0)">')
+  // The mask's dash and gap repeat twelve times around the ring.
+  const [dash = 0, gap = 0] = warned.match(/<mask[^>]*><circle[^>]* stroke-dasharray="([\d.]+) ([\d.]+)"/)?.slice(1).map(Number) ?? []
+  expect(Math.abs((dash + gap) * 12 - circumference)).toBeLessThan(0.001)
+  expect(arc(warned)).toBe(palette.warn)
+  expect(warned).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  // Reduced motion leaves the next segment up at .4 and the rest dark.
+  expect(chase(74)).toEqual({ angles: [180, 210, 240], colors: [palette.warn], seconds: [2.4], resting: ['0.4', '0', '0'] })
+  expect(warned).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
+  expect(chase(70).angles).toEqual([150, 180, 210, 240])
+
+  // Below Compact it chases slowly and faintly in the accent, a bit brighter once Compact shows.
+  expect(chase(20)).toMatchObject({ angles: [-30, 0, 30, 60, 90, 120, 150, 180, 210, 240], colors: [palette.user], seconds: [4] })
+  expect(band(20)).toContain('18%{opacity:0.35}')
+  expect(chase(55)).toMatchObject({ angles: [120, 150, 180, 210, 240], colors: [palette.user], seconds: [3] })
+  expect(band(55)).toContain('18%{opacity:0.5}')
+
+  // From 90% one segment is left, blinking in the error colour; from 97% the arc dims on its beat.
+  const full = band(92)
+  expect(chase(92)).toMatchObject({ angles: [240], colors: [palette.err], seconds: [1.2] })
+  expect(arc(full)).toBe(palette.err)
+  expect(full).not.toContain('dim 1.2s')
+  expect(chase(99)).toMatchObject({ angles: [240], colors: [palette.err], seconds: [1.2] })
+  expect(band(99)).toContain('@keyframes dim{50%{opacity:.6}}')
+  expect(band(99)).toContain(',dim 1.2s ease-in-out infinite"')
+
+  // The plan rings stay plain: a track and a fill each, unmasked.
+  for (const source of [warned, full]) {
+    const plans = source.slice(source.indexOf('</text>'))
+    expect(plans.match(/<circle/g)?.length).toBe(4)
+    expect(plans).not.toContain('mask')
+    expect(plans).not.toContain('jog')
+  }
+  expect(usageSvg([{ label: '5h', percent: 92 }], palette).source).not.toContain('mask')
+})
+
 test('a long cell wraps on its words, breaks a word too long for the column, and caps its lines', async () => {
   expect(wrapCell('the quick brown fox jumps', 90, false)).toEqual(['the quick', 'brown fox', 'jumps'])
   expect(wrapCell('x'.repeat(30), 60, true).every(line => measure(line, true) <= 60)).toBe(true)
