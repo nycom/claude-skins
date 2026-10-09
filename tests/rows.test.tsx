@@ -923,6 +923,48 @@ test('a table scrolled back into view does not rise in again, whatever request d
   await again.unmount()
 })
 
+test('a diff or terminal card scrolled back into view does not rise in again, whatever request draws it', async ($, on) => {
+  const clock = stubEngine(on)
+  const held = '*{animation:none!important}</style>'
+  const result = (requestId: string, tool_use_id: string, tool: string, output: unknown) =>
+    ({ ...SITE, surface: 'desktop', component: 'ToolResult', requestId, props: { tool_use_id, tool, output, isErrored: false } }) as const
+  const cards = [
+    ['scroll-ed', 'Edit', { filePath: '/work/src/a.ts', structuredPatch: [{ oldStart: 1, newStart: 1, lines: ['-a', '+b'] }] }],
+    ['scroll-sh', 'Bash', { stdout: 'built', stderr: '', interrupted: false }],
+  ] as const
+
+  for (const [id, tool, output] of cards) {
+    // Once its rows have risen, the drawing the engine keeps for the row is the still one.
+    const first = await $.ui.mount(result(id, id, tool, output))
+    expect((await svgOf(first)).source).not.toContain(held)
+    await clock.advance(1500)
+    expect((await svgOf(first)).source).toContain(held)
+    await first.unmount()
+
+    // Mounted again under a new request id, the same completed card draws still.
+    const again = await $.ui.mount(result(`${id}-again`, id, tool, output))
+    expect((await svgOf(again)).source).toContain(held)
+    await again.unmount()
+  }
+})
+
+test('a running tool keeps its arc spinning: only completed cards settle', async ($, on) => {
+  const clock = stubEngine(on)
+  const held = '*{animation:none!important}</style>'
+  const running = toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'live-sh', isRunning: true }), 'desktop')
+
+  const ui = await $.ui.mount(running)
+  await clock.advance(1500)
+  const source = (await svgOf(ui)).source
+  expect(source).toContain('class="spin"')
+  expect(source).not.toContain(held)
+  await ui.unmount()
+
+  const again = await $.ui.mount(running)
+  expect((await svgOf(again)).source).not.toContain(held)
+  await again.unmount()
+})
+
 test('when the context ring moves, a weekly ring that did not move stays full instead of replaying', async ($, on) => {
   mock.clock(on)
   let percent = 40

@@ -61,8 +61,8 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 
 A card rises in row by row on its first draw only, the last row starting within a quarter second of
 the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
-theme change) never replays it. A table that streams in rises only the rows added since its last draw;
-one scrolled back into view, or drawn again under a new request, holds still.
+theme change) never replays it. A table that streams in rises only the rows added since its last draw.
+A table, code, diff or terminal card scrolled back into view, or drawn again under a new request, holds still.
 The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s
 after a change the band settles still, so nothing replays. The context bar never animates. Its parts
 are the local estimate /context makes, which sends no requests, read whenever the band's numbers refresh. Reduced motion holds the icons, the cards,

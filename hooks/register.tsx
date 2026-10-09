@@ -148,24 +148,21 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
 const drawKey = (e: { surface: RenderSurface; requestId?: string | undefined }): string | undefined =>
   e.requestId === undefined ? undefined : `${e.surface}:${e.requestId}`
 
-// Rows whose cards have been drawn once; a later draw of one holds its card still (see drawOnce).
-// ponytail: grows by one key per card row for the session; a reload clears it.
-const drawn = new Set<string>()
-const redraw = (key: string | undefined): boolean => {
-  if (key === undefined) return false
-  const seen = drawn.has(key)
-  drawn.add(key)
-  return seen
-}
-
 // Each reply's segments as last drawn. A redraw holds the reply still, but a table that
 // only gained rows, as one does while its reply streams, lets the new rows rise in.
 // ponytail: keeps every reply with a table for the session; a reload clears it.
 const shown = new Map<string, readonly Segment[]>()
-// The cards each surface has drawn, by what they hold: a reply mounted again under a new
-// request, as one scrolled back into view may be, draws cards it has shown still.
+// The cards each surface has drawn, a reply's by what they hold, a tool's by its call: one
+// mounted again under a new request, as one scrolled back into view may be, draws still.
 // ponytail: one entry per card shown for the session; a reload clears it.
 const seenCards = new Set<string>()
+// A tool's card is known by its call and kind, whatever request draws it; true once drawn.
+const sawToolCard = (e: { surface: RenderSurface; props: { tool_use_id: string } }, kind: 'diff' | 'terminal'): boolean => {
+  const card = `${e.surface}:${kind}:${e.props.tool_use_id}`
+  const seen = seenCards.has(card)
+  seenCards.add(card)
+  return seen
+}
 const cardsOf = (surface: RenderSurface, segments: readonly Segment[]): string[] =>
   segments.filter(segment => segment.kind !== 'text').map(segment => `${surface}:${JSON.stringify(segment)}`)
 const freshRows = (e: { surface: RenderSurface; requestId?: string | undefined }, segments: readonly Segment[]): (number | undefined)[] | undefined => {
@@ -594,6 +591,14 @@ reply width: ${lastColumns} columns`
     }
     const look = active === null ? undefined : lookOf($.ui.resolve(e), active, e.surface, copy)
     const columns = e.viewport?.columns ?? 100
+    // A result is drawn once its call is done, so its card animates on its first draw only,
+    // then settles like a reply's (see settleReply).
+    const toolCard = async (kind: 'diff' | 'terminal', draw: () => ReturnType<typeof diffCard>) => {
+      const seen = sawToolCard(e, kind)
+      await read($, memberOf(settledAtom, e))
+      if (!seen) settleReply($, e)
+      return drawOnce(seen, draw)
+    }
 
     // The desktop gets cards: a diff for an edit, a terminal for a shell command.
     if (look?.svg !== undefined && EDITS.has(e.props.tool) && !e.props.isErrored) {
@@ -602,7 +607,7 @@ reply width: ${lastColumns} columns`
       if (diff !== null) {
         const shown = shortenPath(diff.path, await $.session.cwd())
 
-        return drawOnce(redraw(drawKey(e)), () => diffCard(look, look.svg!, diff, shown, columns))
+        return toolCard('diff', () => diffCard(look, look.svg!, diff, shown, columns))
       }
     }
 
@@ -610,7 +615,7 @@ reply width: ${lastColumns} columns`
       const shell = shellOutputOf(e.props.output)
 
       if (shell !== null) {
-        return drawOnce(redraw(drawKey(e)), () => terminalCard(look, look.svg!, shell, e.props.isErrored, columns))
+        return toolCard('terminal', () => terminalCard(look, look.svg!, shell, e.props.isErrored, columns))
       }
     }
 
