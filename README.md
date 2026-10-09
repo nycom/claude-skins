@@ -59,7 +59,7 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
 
-Every card rises in row by row and respects reduced motion, as do the icons; Claude Code's Reduce motion setting turns the terminal shimmer off. A skin only changes what is drawn: the stored
+Every card rises in row by row and respects reduced motion, as do the icons; Claude Code's Reduce motion setting holds every card and icon still and turns the terminal shimmer off. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
 Claude Code's own drawing. The default skin is **noir**, black and white. Cards have no background of
 their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette. With the `auto` theme it

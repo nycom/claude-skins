@@ -631,3 +631,37 @@ test('an auto theme notices the system turning dark mid-session, asking it at mo
   expect(await bashColor('t3')).toBe('#ededed')
   expect(asked).toBe(2)
 })
+
+test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards still, whatever the system says', async ($, on) => {
+  let reduces = true
+  stubEngine(on)
+  on('config.list', () => ({ value: [{ key: 'reduceMotion', label: 'Reduce motion', kind: 'boolean', value: reduces, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  // The rule outside any media query: the one inside it follows the system, not the setting.
+  const holdsStill = (source: string | undefined) =>
+    (source ?? '').split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  const icon = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'rm1', isRunning: true }), 'desktop'))
+  expect(holdsStill(((await icon.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
+  await icon.unmount()
+
+  const card = await $.ui.mount({
+    ...SITE,
+    surface: 'desktop',
+    component: 'ToolResult',
+    requestId: 'rm2',
+    props: { tool_use_id: 'rm2', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false },
+  })
+  expect(holdsStill(((await card.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
+  await card.unmount()
+
+  // Turned off again, only the system's preference holds them still.
+  reduces = false
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const moving = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'rm3', isRunning: true }), 'desktop'))
+  expect(holdsStill(((await moving.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(false)
+})

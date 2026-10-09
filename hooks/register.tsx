@@ -20,6 +20,7 @@ import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
 import { limitLabel, metersOf } from './svg-usage'
 import { shortenPath } from './format'
+import { holdStill } from './svg-kit'
 import { kindOf, summarize } from './tools'
 
 const SETTINGS = 'skins-settings'
@@ -118,6 +119,7 @@ type ConfigMemo = { followsSystem: boolean; reducesMotion: boolean }
 
 async function readConfig($: EngineInterface, memo: ConfigMemo): Promise<void> {
   Object.assign(memo, await refreshTheme($))
+  holdStill(memo.reducesMotion)
 }
 
 // Every surface's element table names Svg, but the terminal draws it as nothing, so

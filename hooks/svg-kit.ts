@@ -66,6 +66,20 @@ export const MAX_STAGGER_MS = 250
 
 export const staggerMs = (index: number, stepMs: number): number => Math.min(index * stepMs, MAX_STAGGER_MS)
 
+// ponytail: module state, set from Claude Code's Reduce motion setting each time it is read,
+// so every card and icon drawn after holds still; a per-render flag would thread through
+// every builder.
+let isStill = false
+
+export const holdStill = (on: boolean): void => {
+  isStill = on
+}
+
+// Holds every animation still: always under Claude Code's Reduce motion, else when the
+// system asks for reduced motion.
+export const still = (): string =>
+  isStill ? '*{animation:none!important}' : '@media (prefers-reduced-motion:reduce){*{animation:none!important}}'
+
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
   `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
 
@@ -89,7 +103,7 @@ export function svgCard(width: number, height: number, palette: Palette, style: 
     `<defs><clipPath id="${clip}"><rect width="${width}" height="${height}" rx="${RADIUS}"/></clipPath></defs>`,
     // Sans for text that names no font of its own: a CSS rule on all text would beat the
     // monospace attribute on code, paths and output.
-    `<style>text{fill:${palette.fg}}text:not([font-family]){font-family:${FONT}}${MOTION}${style}</style>`,
+    `<style>text{fill:${palette.fg}}text:not([font-family]){font-family:${FONT}}${MOTION}${style}${still()}</style>`,
     `<g class="card"><g clip-path="url(#${clip})">${body}</g>`,
     `<rect x=".5" y=".5" width="${width - 1}" height="${height - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${palette.fg}" stroke-opacity=".3"/></g>`,
     `</svg>`,

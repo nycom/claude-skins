@@ -1,4 +1,5 @@
 import type { Kind } from './skin'
+import { still } from './svg-kit'
 
 // Vector icons and spinners for the surfaces that draw `Svg` (the desktop app). Each is a
 // whole SVG document; animation is CSS, which plays in the image the desktop draws.
@@ -21,10 +22,8 @@ const SPIN = [
 
 // With reduced motion every icon holds still in its resting pose: the arc, the orb, the
 // bars and the dots stay drawn, so the state still shows.
-const STILL = '@media (prefers-reduced-motion:reduce){*{animation:none!important}}'
-
 const svg = (size: number, style: string, body: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24"><style>${style}${STILL}</style>${body}</svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24"><style>${style}${still()}</style>${body}</svg>`
 
 // Marks in the icon's bottom-right corner, so a status reads by shape as well as colour:
 // a cross for a failed call, a dotted ring for an interrupted one.
