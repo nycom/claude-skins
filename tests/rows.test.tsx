@@ -944,11 +944,11 @@ test('the context ring chases faster in warn from 70% with Compact offered, and 
   }
   const held = (source: string) => source.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
 
-  expect(await ring()).toContain('animation:jog 3s ease-in-out')
+  expect(await ring()).toMatch(/animation:jog\d+ 3s ease-in-out/)
   percent = 72
   const nudged = await ring()
-  expect(nudged).toContain('@keyframes jog{')
-  expect(nudged).toContain('animation:jog 2.4s ease-in-out')
+  expect(nudged).toMatch(/@keyframes jog\d+\{/)
+  expect(nudged).toMatch(/animation:jog\d+ 2.4s ease-in-out/)
   expect(held(nudged)).toBe(false)
   reduces = true
   expect(held(await ring())).toBe(true)

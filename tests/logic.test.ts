@@ -351,7 +351,7 @@ test('the context ring is a jog ring whose unlit segments chase toward 12, faste
   const circumference = 2 * Math.PI * 8
   const band = (context: number) => usageSvg([{ label: 'context', percent: context }, { label: '5h', percent: 19 }, { label: '7d', percent: 23 }], palette).source
   const chase = (context: number) => {
-    const heads = [...band(context).matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog ([\d.]+)s/g)]
+    const heads = [...band(context).matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog\d+ ([\d.]+)s/g)]
     return { angles: heads.map(m => Number(m[3])), colors: [...new Set(heads.map(m => m[1]))], seconds: [...new Set(heads.map(m => Number(m[4])))], resting: heads.map(m => m[2]) }
   }
   const arc = (source: string) => source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1]
@@ -363,7 +363,7 @@ test('the context ring is a jog ring whose unlit segments chase toward 12, faste
   const [dash = 0, gap = 0] = warned.match(/<mask[^>]*><circle[^>]* stroke-dasharray="([\d.]+) ([\d.]+)"/)?.slice(1).map(Number) ?? []
   expect(Math.abs((dash + gap) * 12 - circumference)).toBeLessThan(0.001)
   expect(arc(warned)).toBe(palette.warn)
-  expect(warned).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  expect(warned).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
   // Reduced motion leaves the next segment up at .4 and the rest dark.
   expect(chase(74)).toEqual({ angles: [180, 210, 240], colors: [palette.warn], seconds: [2.4], resting: ['0.4', '0', '0'] })
   expect(warned).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
@@ -384,14 +384,57 @@ test('the context ring is a jog ring whose unlit segments chase toward 12, faste
   expect(band(99)).toContain('@keyframes dim{50%{opacity:.6}}')
   expect(band(99)).toContain(',dim 1.2s ease-in-out infinite"')
 
-  // The plan rings stay plain: a track and a fill each, unmasked.
+  // The plan rings share the twelve segments under their own masks, square-ended, in their
+  // meter colour; well short of the limit they hold still.
   for (const source of [warned, full]) {
     const plans = source.slice(source.indexOf('</text>'))
-    expect(plans.match(/<circle/g)?.length).toBe(4)
-    expect(plans).not.toContain('mask')
-    expect(plans).not.toContain('jog')
+    expect(plans).toContain('<mask id="jog1"')
+    expect(plans).toContain('<g mask="url(#jog1)">')
+    expect(plans).toContain('<mask id="jog2"')
+    expect(plans).toContain('<g mask="url(#jog2)">')
+    expect(plans.match(/<circle/g)?.length).toBe(6)
+    expect(plans).not.toContain('animation:jog')
+    expect(plans).not.toContain('linecap')
+    expect(arc(plans)).toBe(meterColor(19, palette))
   }
-  expect(usageSvg([{ label: '5h', percent: 92 }], palette).source).not.toContain('mask')
+})
+
+test('a plan ring is a still jog ring until 80%, then chases in the warning colour, and from 95% blinks its last segment', async () => {
+  const { palette } = tokyoNight
+  for (const label of ['5h', '7d']) {
+    const ring = (percent: number) => {
+      const source = usageSvg([{ label, percent }], palette).source
+      const heads = [...source.matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog0 ([\d.]+)s/g)]
+      return {
+        source,
+        arc: source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1],
+        chase: { angles: heads.map(m => Number(m[3])), colors: [...new Set(heads.map(m => m[1]))], seconds: [...new Set(heads.map(m => Number(m[4])))], resting: heads.map(m => m[2]) },
+      }
+    }
+
+    const still = ring(79)
+    expect(still.source).toContain('<g mask="url(#jog0)">')
+    expect(still.source).not.toContain('jog0{')
+    expect(still.chase.angles).toEqual([])
+    expect(still.arc).toBe(meterColor(79, palette))
+
+    const near = ring(85)
+    expect(near.arc).toBe(palette.warn)
+    expect(near.chase).toEqual({ angles: [210, 240], colors: [palette.warn], seconds: [3], resting: ['0.4', '0'] })
+    expect(near.source).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
+
+    const over = ring(96)
+    expect(over.arc).toBe(palette.err)
+    expect(over.chase).toEqual({ angles: [240], colors: [palette.err], seconds: [1.2], resting: ['0.4'] })
+    expect(over.source).toContain('18%{opacity:0.75}')
+    expect(over.source).not.toContain('dim')
+    expect(over.source).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
+  }
+
+  // Beside a chasing context ring, each ring chases on its own keyframes.
+  const both = usageSvg([{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }], palette).source
+  expect(both).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  expect(both).toContain('@keyframes jog1{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
 })
 
 test('a long cell wraps on its words, breaks a word too long for the column, and caps its lines', async () => {

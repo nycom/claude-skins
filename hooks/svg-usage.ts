@@ -147,13 +147,22 @@ export const COMPACT_NUDGE = 70
 // light one after another, like a deck's track-end warning, faster and brighter as the context
 // fills. From 90% only the last is left, blinking; from 97% the arc dims on the same beat.
 const SEGMENTS = 12
-const JOG_TIERS: readonly { from: number; slot: 'user' | 'warn' | 'err'; seconds: number; peak: number }[] = [
+type JogTier = { from: number; slot: 'user' | 'warn' | 'err'; seconds: number; peak: number }
+const JOG_TIERS: readonly JogTier[] = [
   { from: 90, slot: 'err', seconds: 1.2, peak: 0.75 },
   { from: COMPACT_NUDGE, slot: 'warn', seconds: 2.4, peak: 0.75 },
   { from: COMPACT_SHOW, slot: 'user', seconds: 3, peak: 0.5 },
   { from: 0, slot: 'user', seconds: 4, peak: 0.35 },
 ]
 const JOG_DIM = 97
+
+// The plan limits share the segments but hold still until near the limit: a slow chase in the
+// warning colour from 80%, and from 95% the last segment blinking in the error colour, where
+// meterColor turns too.
+const PLAN_TIERS: readonly JogTier[] = [
+  { from: 95, slot: 'err', seconds: 1.2, peak: 0.75 },
+  { from: 80, slot: 'warn', seconds: 3, peak: 0.5 },
+]
 
 const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${meter.note === undefined ? '' : ` · ${meter.note}`}`
 
@@ -176,20 +185,24 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
       const x = (lefts[i] ?? 0) + RING_R + 4
       const filled = (circumference * meter.percent) / 100
       const start = (circumference * (starts[i] ?? 0)) / 100
-      const jog = meter.label === 'context' ? JOG_TIERS.find(tier => meter.percent >= tier.from) : undefined
+      const isContext = meter.label === 'context'
+      const jog = (isContext ? JOG_TIERS : PLAN_TIERS).find(tier => meter.percent >= tier.from)
       const color = jog === undefined ? meterColor(meter.percent, palette) : palette[jog.slot]
       // Each ring has its own keyframes, from where it was to where it is; none when it did not move.
       const moves = [
         ...(start === filled ? [] : [`fill${i} .9s cubic-bezier(.2,.8,.2,1)`]),
-        ...(jog !== undefined && meter.percent >= JOG_DIM ? [`dim ${jog.seconds}s ease-in-out infinite`] : []),
+        ...(jog !== undefined && isContext && meter.percent >= JOG_DIM ? [`dim ${jog.seconds}s ease-in-out infinite`] : []),
       ]
       const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
       ramps.push(start === filled ? '' : `@keyframes fill${i}{from{stroke-dasharray:${start} ${circumference}}}`)
 
-      // A jog ring's arc ends square: a round cap would poke past a gap into the next segment.
+      // Every ring is a jog ring, masked to twelve segments by an 8° gap centred on every hour.
+      // Its arc ends square: a round cap would poke past a gap into the next segment.
+      const segment = circumference / SEGMENTS
       const ring = [
+        `<mask id="jog${i}" maskUnits="userSpaceOnUse" x="${x - 12}" y="${CY - 12}" width="24" height="24"><circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(segment * 22) / 30} ${(segment * 8) / 30}" transform="rotate(-86 ${x} ${CY})"/></mask><g mask="url(#jog${i})">`,
         `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
-        `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5"${jog === undefined ? ' stroke-linecap="round"' : ''} stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
+        `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
       ]
 
       if (jog !== undefined) {
@@ -198,19 +211,17 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
         const count = SEGMENTS - first
         // Each lights a tenth of a cycle after the one before, closer when that would run past the cycle.
         const step = Math.min(jog.seconds / 10, (jog.seconds * 0.55) / Math.max(1, count - 1))
-        const segment = circumference / SEGMENTS
-        ramps.push(`@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, meter.percent >= JOG_DIM ? '@keyframes dim{50%{opacity:.6}}' : '')
-        // An 8° gap centred on every hour; held still, only the next segment up shows, at .4.
-        ring.unshift(
-          `<mask id="jog${i}" maskUnits="userSpaceOnUse" x="${x - 12}" y="${CY - 12}" width="24" height="24"><circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(segment * 22) / 30} ${(segment * 8) / 30}" transform="rotate(-86 ${x} ${CY})"/></mask><g mask="url(#jog${i})">`,
-        )
+        // Each ring has its own chase keyframes, as their peaks differ.
+        ramps.push(`@keyframes jog${i}{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, isContext && meter.percent >= JOG_DIM ? '@keyframes dim{50%{opacity:.6}}' : '')
+        // Held still, only the next segment up shows, at .4.
         ring.push(
           ...Array.from({ length: count }, (_, n) =>
-            `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${segment} ${circumference}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${x} ${CY})" style="animation:jog ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
+            `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${segment} ${circumference}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${x} ${CY})" style="animation:jog${i} ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
           ),
-          '</g>',
         )
       }
+
+      ring.push('</g>')
 
       return [
         ...ring,
