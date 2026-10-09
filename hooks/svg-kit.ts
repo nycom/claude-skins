@@ -85,6 +85,7 @@ export const staggerMs = (index: number, stepMs: number): number => Math.min(ind
 // so every card and icon drawn after holds still; a per-render flag would thread through
 // every builder.
 let isStill = false
+let isRedraw = false
 
 export const holdStill = (on: boolean): void => {
   isStill = on
@@ -93,20 +94,28 @@ export const holdStill = (on: boolean): void => {
 // A surface swaps a card's image whenever its row is drawn again (a setting, a theme poll,
 // the host's own repaint), and a new image plays its rise-in again. So a row animates on
 // its first draw only; `draw` builds the card held still when this is a redraw.
-export function drawOnce<T>(isRedraw: boolean, draw: () => T): T {
-  const was = isStill
-  isStill = was || isRedraw
+export function drawOnce<T>(redraws: boolean, draw: () => T): T {
+  const was = isRedraw
+  isRedraw = was || redraws
   try {
     return draw()
   } finally {
-    isStill = was
+    isRedraw = was
   }
 }
 
+const HOLD = '*{animation:none!important}'
+const SYSTEM_HOLD = `@media (prefers-reduced-motion:reduce){${HOLD}}`
+
 // Holds every animation still: always under Claude Code's Reduce motion, else when the
-// system asks for reduced motion.
-export const still = (): string =>
-  isStill ? '*{animation:none!important}' : '@media (prefers-reduced-motion:reduce){*{animation:none!important}}'
+// system asks for reduced motion, and on a redraw all but the `moving` elements, such as
+// a table's rows that streamed in since its last draw.
+export const still = (moving?: string): string =>
+  isStill || (isRedraw && moving === undefined)
+    ? HOLD
+    : isRedraw
+      ? `:not(${moving}){animation:none!important}${SYSTEM_HOLD}`
+      : SYSTEM_HOLD
 
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
   `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
@@ -122,7 +131,7 @@ export const CONTROL_SLOT = 124
 export const HEADER_MID = 29
 
 // The card: a rounded hairline outline, with everything inside clipped to its corners.
-export function svgCard(width: number, height: number, palette: Palette, style: string, body: string): string {
+export function svgCard(width: number, height: number, palette: Palette, style: string, body: string, moving?: string): string {
   // Unique per size, so cards placed together in one document keep their own corners.
   const clip = `corners-${width}x${height}`
 
@@ -131,7 +140,7 @@ export function svgCard(width: number, height: number, palette: Palette, style: 
     `<defs><clipPath id="${clip}"><rect width="${width}" height="${height}" rx="${RADIUS}"/></clipPath></defs>`,
     // Sans for text that names no font of its own: a CSS rule on all text would beat the
     // monospace attribute on code, paths and output.
-    `<style>text{fill:${palette.fg}}text:not([font-family]){font-family:${FONT}}${MOTION}${style}${still()}</style>`,
+    `<style>text{fill:${palette.fg}}text:not([font-family]){font-family:${FONT}}${MOTION}${style}${still(moving)}</style>`,
     `<g class="card"><g clip-path="url(#${clip})">${body}</g>`,
     `<rect x=".5" y=".5" width="${width - 1}" height="${height - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${palette.fg}" stroke-opacity=".3"/></g>`,
     `</svg>`,

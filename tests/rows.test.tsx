@@ -725,6 +725,34 @@ test('a card animates on its first draw only: a redraw of the same row holds sti
   await table.unmount()
 })
 
+test('a table that grows while its reply streams: only the rows new since the last draw rise in', async ($, on) => {
+  stubEngine(on)
+  const draw = async (rows: string[]) => {
+    const ui = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'grow-tb', props: { text: ['| A | B |', '| --- | --- |', ...rows].join('\n') } as never })
+    const source = ((await ui.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    await ui.unmount()
+    return source
+  }
+  // Each row's group, in order, with the text of its cells.
+  const rowsOf = (source: string) => [...source.matchAll(/<g class="(row[^"]*)" style="animation-delay:(\d+)ms">(.*?)<\/g><\/g>/g)].map(([, cls, delay, body]) => ({ cls, delay, text: [...(body ?? '').matchAll(/>([^<]+)<\/text>/g)].map(m => m[1]).join(' ') }))
+  const all = ['| 1 | 2 |', '| 3 | four |', '| 5 | 6 |', '| 7 | 8 |']
+
+  // The last row is still streaming: drawn half-written, then finished on the next draw.
+  expect(await draw(['| 1 | 2 |', '| 3 | fo'])).not.toContain('*{animation:none!important}</style>')
+
+  const grown = await draw(all)
+  const rows = rowsOf(grown)
+  expect(rows.map(row => [row.cls, row.text])).toEqual([['row', '1 2'], ['row', '3 four'], ['row fresh', '5 6'], ['row fresh', '7 8']])
+  // The new rows start their stagger at once; everything but them, header and rule included, holds still.
+  expect(rows[2]?.delay).toBe('120')
+  expect(grown).toContain(':not(.fresh){animation:none!important}')
+  expect(grown).not.toContain('*{animation:none!important}</style>')
+
+  const again = await draw(all)
+  expect(again).toContain('*{animation:none!important}</style>')
+  expect(again).not.toContain('fresh')
+})
+
 test('when the context ring moves, a weekly ring that did not move stays full instead of replaying', async ($, on) => {
   mock.clock(on)
   let percent = 40

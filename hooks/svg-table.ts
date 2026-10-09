@@ -182,7 +182,9 @@ function cellMarkup(cell: Cell, left: number, width: number, align: Align, rowH:
 
 // `width` is the room the reply gives the card, in pixels; it is clamped to a sane range.
 // `hasControl` keeps a gutter at the right for a Copy button laid over the header.
-export function tableSvg(table: Table, palette: Palette, width: number, hasControl = false): SvgTable {
+// `fresh` is the first row new since the card's last draw: on a redraw only rows from it
+// on rise in, their stagger starting at once.
+export function tableSvg(table: Table, palette: Palette, width: number, hasControl = false, fresh?: number): SvgTable {
   const cardWidth = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)))
   const reserve = hasControl ? CONTROL_SLOT : 0
   const widths = fitColumns(naturalWidths(table), cardWidth, reserve)
@@ -207,9 +209,10 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
       const rowH = heights[r] ?? MIN_ROW_H
       const markup = cells.map((cell, i) => cellMarkup(cell, lefts[i] ?? 0, widths[i] ?? 0, align(i), rowH, palette)).join('')
       const band = r % 2 === 1 ? `fill="${palette.fg}" fill-opacity=".05"` : 'fill="none"'
+      const isFresh = fresh !== undefined && r >= fresh
 
       // The outer group places the row; the inner one rises relative to that place.
-      return `<g transform="translate(0 ${tops[r] ?? 0})"><g class="row" style="animation-delay:${120 + staggerMs(r, STAGGER_MS)}ms"><rect class="bg" x="0" y="0" width="${cardWidth}" height="${rowH}" ${band}/>${markup}</g></g>`
+      return `<g transform="translate(0 ${tops[r] ?? 0})"><g class="${isFresh ? 'row fresh' : 'row'}" style="animation-delay:${120 + staggerMs(isFresh ? r - fresh : r, STAGGER_MS)}ms"><rect class="bg" x="0" y="0" width="${cardWidth}" height="${rowH}" ${band}/>${markup}</g></g>`
     })
     .join('')
 
@@ -231,7 +234,7 @@ export function tableSvg(table: Table, palette: Palette, width: number, hasContr
   ].join('')
 
   return {
-    source: svgCard(cardWidth, height, palette, style, body),
+    source: svgCard(cardWidth, height, palette, style, body, fresh === undefined ? undefined : '.fresh'),
     width: cardWidth,
     height,
     alt: [table.header.join(' | '), ...table.rows.map(row => row.join(' | '))].join('\n'),

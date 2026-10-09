@@ -10,6 +10,7 @@ import { DESIGN_TOOL, runDesign } from './designer'
 import type { DesignState } from './designer'
 import { clipLines, diffstat, pick } from './format'
 import { splitReply } from './markdown'
+import type { Segment } from './markdown'
 import { askBand, desktopSpinnerRow, diffCard, footerRow, terminalCard, usageBand, groupRow, promptRow, replyRows, spinnerRow, toolRow } from './rows'
 import type { Look, SvgElement, Ui } from './rows'
 import { galleryPane } from './gallery'
@@ -123,6 +124,26 @@ const redraw = (requestId: string | undefined): boolean => {
   const seen = drawn.has(requestId)
   drawn.add(requestId)
   return seen
+}
+
+// Each reply's segments as last drawn. A redraw holds the reply still, but a table that
+// only gained rows, as one does while its reply streams, lets the new rows rise in.
+// ponytail: keeps every reply with a table for the session; a reload clears it.
+const shown = new Map<string, readonly Segment[]>()
+const freshRows = (requestId: string | undefined, segments: readonly Segment[]): (number | undefined)[] | undefined => {
+  if (requestId === undefined) return undefined
+  const last = shown.get(requestId)
+  shown.set(requestId, segments)
+  if (last === undefined) return undefined
+
+  return segments.map((segment, i) => {
+    const prior = last[i]
+    const before = prior?.kind === 'table' ? prior.rows : []
+    // The last row may have been drawn half-written and finished since, so it may differ.
+    const kept = before.slice(0, -1).every((row, r) => row.join('\n') === segment.rows[r]?.join('\n'))
+    const grew = segment.kind === 'table' && segment.rows.length > before.length && kept
+    return grew ? before.length : undefined
+  })
 }
 
 // The band's rings grow from their last reading (see rampFrom); once they have grown, one
@@ -568,8 +589,10 @@ reply width: ${lastColumns} columns`
       void $.ui.copy({ text: copied, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
     }
 
-    return drawOnce(redraw(e.requestId), () =>
-      replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined),
+    const fresh = freshRows(e.requestId, segments)
+
+    return drawOnce(fresh !== undefined, () =>
+      replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined, fresh),
     )
   })
 

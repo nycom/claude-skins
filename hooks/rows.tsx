@@ -336,8 +336,8 @@ function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt:
   )
 }
 
-function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string) {
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string, fresh?: number) {
+  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined, fresh)
 
   return cardWithCopy(look, Svg, card, key, tableMarkdown(table), 'Copy table')
 }
@@ -370,7 +370,8 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy cod
   )
 }
 
-export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement) {
+// `fresh` holds, per segment, the first table row new since the reply's last draw.
+export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, fresh: readonly (number | undefined)[] = []) {
   const { Box, Markdown } = look.ui
 
   return (
@@ -394,7 +395,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
         return Svg === undefined ? (
           tableRows(look, segment, maxWidth, copyButton(look, `copy-${i}`, tableMarkdown(segment)))
         ) : (
-          tableCard(look, segment, Svg, maxWidth, `copy-${i}`)
+          tableCard(look, segment, Svg, maxWidth, `copy-${i}`, fresh[i])
         )
       })}
     </Box>
