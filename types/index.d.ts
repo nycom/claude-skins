@@ -40,8 +40,15 @@ export type CustomSkin = {
 }
 
 // How full the context window is and how much of each plan limit is spent, in percent,
-// as the band above the prompt shows them.
-export type UsageSnap = { context: number | null; limits: { label: string; percent: number }[] }
+// as the band above the prompt shows them: the context's tokens of its window, when each
+// limit resets (ISO 8601), and the tokens of each part of the context that fills it.
+export type UsageSnap = {
+  context: number | null
+  tokens?: number
+  window?: number
+  limits: { label: string; percent: number; resetsAt?: string }[]
+  parts?: { name: string; tokens: number }[]
+}
 
 // What one turn did, shown in its footer.
 export type TurnStats = { tools: number; added: number; removed: number }

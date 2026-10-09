@@ -19,7 +19,7 @@ import { ICONS } from './skin'
 import type { Skin } from './skin'
 import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
-import { limitLabel, metersOf, rampFrom, SETTLE_MS } from './svg-usage'
+import { limitLabel, metersOf, partsOf, rampFrom, SETTLE_MS } from './svg-usage'
 import { shortenPath } from './format'
 import { drawOnce, holdStill } from './svg-kit'
 import { kindOf, summarize } from './tools'
@@ -159,6 +159,13 @@ const freshRows = (key: string | undefined, segments: readonly Segment[]): (numb
 // more draw settles them.
 const ramp = rampFrom()
 let settle: { cancel(): void } | undefined
+// A reset's label changes at local midnight (`tmrw` to today's time) and when it passes (to
+// none); nothing else redraws the band then, so one timer wakes it at the sooner of the two.
+let relabel: { at: number; timer: { cancel(): void } } | undefined
+const stopRelabel = (): void => {
+  relabel?.timer.cancel()
+  relabel = undefined
+}
 
 // What the settings said when last read.
 type ConfigMemo = Awaited<ReturnType<typeof refreshTheme>>
@@ -251,11 +258,20 @@ async function runFolderCommand($: EngineInterface, word: string): Promise<strin
   }
 }
 
+// The breakdown is the local estimate, which sends no requests, asked only while the band
+// draws; when it fails the band goes on without its bar.
 async function refreshUsage($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage()
+  const isBand = (await activeSkin($))?.prefs.band === true
+  const usage = await (isBand ? $.session.usage({ breakdown: 'summary' }).catch(() => $.session.usage()) : $.session.usage())
+  const categories = usage.context.breakdown?.categories
   const snap: UsageSnap = {
     context: usage.context.percent ?? null,
-    limits: usage.rateLimits.map(limit => ({ label: limitLabel(limit.kind), percent: limit.percentUsed })),
+    window: usage.context.window,
+    limits: usage.rateLimits.map(limit => ({ label: limitLabel(limit.kind), percent: limit.percentUsed, resetsAt: limit.resetsAt })),
+    ...(usage.context.tokens === undefined ? {} : { tokens: usage.context.tokens }),
+    ...(Array.isArray(categories)
+      ? { parts: categories.filter(category => category.kind === 'used').map(category => ({ name: category.name, tokens: category.tokens })) }
+      : {}),
   }
 
   await update($, usageAtom, () => snap)
@@ -297,6 +313,7 @@ export const register: Register = on => {
     await load($)
     await refreshUsage($)
     await readConfig($, config)
+    stopRelabel()
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -316,6 +333,7 @@ export const register: Register = on => {
   // /clear, /resume and /branch reset $.state to its defaults and skip session.start.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await load($)
+    stopRelabel()
     await readConfig($, config)
 
     return next(e)
@@ -649,19 +667,29 @@ reply width: ${lastColumns} columns`
     return footerRow(lookOf($.ui.resolve(e), active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
   })
 
-  // The band above the prompt: context and plan limits. Another mod's drawing there,
-  // and a survey, keep their place.
+  // The band above the prompt: context and plan limits. A survey keeps its place. Another
+  // mod's drawing there stays above the band, whatever order the hooks run in, so the band
+  // sits last, nearest the prompt. Only the desktop spaces them: a terminal gap is a whole row.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const active = await activeSkin($)
-    const meters = metersOf(await read($, usageAtom))
+    const usage = await read($, usageAtom)
+    const now = await $.clock.now()
+    const meters = metersOf(usage, now)
 
     if (active === null || !active.prefs.band || e.props.hasSurvey || meters.length === 0) {
+      // Nothing drawn, so nothing to relabel; the band's next draw arms it again.
+      stopRelabel()
       return next(e)
     }
 
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
+    // With no mod's row above, what comes back is the engine's own band, by reference, which
+    // draws nothing without a survey; it is left out, so no empty row or gap sits above the rings.
+    // ponytail: only that bare pass-through is known to draw nothing; a mod's own Box around it
+    // may be its padding, border or height, so it keeps the gap. Look inside if a mod wraps it.
     const theirs = await next(e)
+    const above = theirs.type === 'engine' ? null : theirs
     // Compacting mid-turn would cut the turn's own context out from under it.
     // Runs Claude Code's own /compact, so the person sees its usual progress and result.
     // Work a press starts is abandoned when the press ends, which cancels a compaction
@@ -679,7 +707,7 @@ reply width: ${lastColumns} columns`
       )
     }
 
-    const starts = ramp(meters, await $.clock.now())
+    const starts = ramp(meters, now)
     if (settle === undefined && starts.some((start, i) => start !== meters[i]?.percent)) {
       settle = $.clock.after(SETTLE_MS, () => {
         settle = undefined
@@ -687,10 +715,24 @@ reply width: ${lastColumns} columns`
       })
     }
 
+    const today = new Date(now)
+    const resets = usage.limits.map(limit => Date.parse(limit.resetsAt ?? '')).filter(at => at > now)
+    const due = Math.min(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), ...resets)
+    if (resets.length > 0 && relabel?.at !== due) {
+      stopRelabel()
+      relabel = {
+        at: due,
+        timer: $.clock.after(due - now, () => {
+          relabel = undefined
+          return update($, usageAtom, usage => ({ ...usage }))
+        }),
+      }
+    }
+
     return (
-      <Box flexDirection="column">
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts)}
-        {theirs}
+      <Box flexDirection="column" rowGap={above !== null && look.surface === 'desktop' ? 1 : 0}>
+        {above}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
       </Box>
     )
   })

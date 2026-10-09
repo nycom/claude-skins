@@ -3,19 +3,20 @@ import { expect, test } from 'claude-code/testing'
 import { DEFAULT_PREFS, parsePrefs, runSkinCommand } from '../hooks/command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from '../hooks/custom'
 import { runDesign } from '../hooks/designer'
-import { clipLines, diffstat, formatDuration, formatMs, pick, shortenPath } from '../hooks/format'
+import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
 import { MAX_ALT } from '../hooks/svg-kit'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
-import { limitLabel, meterColor, metersOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
+import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
 import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
 import tokyoNight from '../hooks/themes/tokyo-night'
+import noir from '../hooks/themes/noir'
 
 const NAMES = ['tokyo-night', 'dracula', 'nord']
 
@@ -295,12 +296,98 @@ test('code is split into comments, strings, numbers and keywords by language', a
 test('plan limits read as 5h and 7d, and a meter warns as it fills', async () => {
   expect(limitLabel('five_hour')).toBe('5h')
   expect(limitLabel('seven_day')).toBe('7d')
-  expect(metersOf({ context: 42.4, limits: [{ label: '5h', percent: 120 }] })).toEqual([
+  expect(metersOf({ context: 42.4, limits: [{ label: '5h', percent: 120 }] }, 0)).toEqual([
     { label: 'context', percent: 42 },
     { label: '5h', percent: 100 },
   ])
   expect(meterColor(85, tokyoNight.palette)).toBe(tokyoNight.palette.warn)
   expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
+  // The ring reads `tmrw`; a reader hears the word.
+  expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
+})
+
+test('the breakdown bar draws no names, its alt carries every part, and one-colour parts step down in opacity', async () => {
+  const parts = partsOf([{ name: 'Messages', tokens: 61 }, { name: 'System tools', tokens: 22 }, { name: 'System prompt', tokens: 9 }, { name: 'Memory files', tokens: 8 }])
+  const opacitiesOf = (source: string): number[] => [...source.matchAll(/<rect class="part" [^>]*fill-opacity="([\d.]+)"/g)].map(m => Number(m[1]))
+
+  for (const [palette, bg] of [[noir.palette, '#262624'], [forTheme(noir, true).palette, LIGHT_BG]] as const) {
+    const { source, alt } = usageSvg([{ label: 'context', percent: 48 }], palette, [], false, parts)
+
+    expect(source).not.toContain('msgs')
+    expect(alt).toBe('context 48%; context holds msgs 61%, tools 22%, sys 9%, memory 8%')
+    expect(opacitiesOf(source)).toEqual([1, 0.8, 0.62, 0.48])
+    // The three largest segments read at 3:1 on the page and on their track.
+    for (const [i, slot] of (['user', 'run', 'read'] as const).entries()) {
+      const opacity = opacitiesOf(source)[i] ?? 1
+      expect(contrast(over(palette[slot], opacity, bg), bg)).toBeGreaterThanOrEqual(3)
+      expect(contrast(over(palette[slot], opacity, bg), over(palette.muted, TRACK_OPACITY, bg))).toBeGreaterThanOrEqual(3)
+    }
+  }
+
+  // A skin with a colour per part keeps them at full strength, and so do colours only near each other.
+  const near = { ...tokyoNight.palette, user: '#7aa2f7', run: '#7ba3f6', read: '#7ca4f5', write: '#7da5f4' }
+  for (const palette of [tokyoNight.palette, near]) {
+    expect(opacitiesOf(usageSvg([{ label: 'context', percent: 48 }], palette, [], false, parts).source)).toEqual([1, 1, 1, 1])
+  }
+})
+
+test('token counts read compactly, and a reset reads as a time today, tomorrow or on a weekday', async () => {
+  expect([950, 1500, 96_000, 200_000, 999_700, 1_200_000].map(compactCount)).toEqual(['950', '1.5k', '96k', '200k', '1M', '1.2M'])
+
+  // Built from local times, so the expectations hold in any time zone. A Friday noon.
+  const now = new Date(2026, 9, 9, 12, 0).getTime()
+  expect(resetLabel(new Date(2026, 9, 9, 14, 40).toISOString(), now)).toBe('2:40pm')
+  expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), now)).toBe('11:00pm')
+  // Under a day away but on Saturday, so not a time that reads as already gone.
+  expect(resetLabel(new Date(2026, 9, 10, 0, 5).toISOString(), now)).toBe('tmrw 12:05am')
+  expect(resetLabel(new Date(2026, 9, 10, 9, 0).toISOString(), now)).toBe('tmrw 9:00am')
+  // Calendar days, not 24 hours: Saturday evening is still tomorrow.
+  expect(resetLabel(new Date(2026, 9, 10, 20, 0).toISOString(), now)).toBe('tmrw 8:00pm')
+  expect(resetLabel(new Date(2026, 9, 12, 9, 0).toISOString(), now)).toBe('Mon 9:00am')
+  // Across a month: Saturday the 31st to Sunday the 1st, then Tuesday the 3rd.
+  const lastOfOctober = new Date(2026, 9, 31, 22, 0).getTime()
+  expect(resetLabel(new Date(2026, 10, 1, 9, 0).toISOString(), lastOfOctober)).toBe('tmrw 9:00am')
+  expect(resetLabel(new Date(2026, 10, 3, 9, 30).toISOString(), lastOfOctober)).toBe('Tue 9:30am')
+  // A week off falls on today's weekday, so it says which one; six days off is the coming weekday.
+  const fridayMorning = new Date(2026, 9, 9, 9, 30).getTime()
+  expect(resetLabel(new Date(2026, 9, 16, 9, 0).toISOString(), fridayMorning)).toBe('next Fri 9:00am')
+  expect(resetLabel(new Date(2026, 9, 15, 9, 0).toISOString(), fridayMorning)).toBe('Thu 9:00am')
+  // A reset already gone, seen before the next reading, names no time: the window has reset.
+  expect(resetLabel(new Date(2026, 9, 9, 23, 0).toISOString(), new Date(2026, 9, 10, 9, 0).getTime())).toBeUndefined()
+  expect(resetLabel(new Date(2026, 9, 9, 11, 0).toISOString(), now)).toBeUndefined()
+  expect(resetLabel(new Date(now).toISOString(), now)).toBeUndefined()
+  expect(resetLabel(undefined, now)).toBeUndefined()
+  expect(resetLabel('soon', now)).toBeUndefined()
+
+  const usage = {
+    context: 48,
+    tokens: 96_000,
+    window: 200_000,
+    limits: [
+      { label: '5h', percent: 19, resetsAt: new Date(2026, 9, 9, 14, 40).toISOString() },
+      { label: '7d', percent: 23 },
+    ],
+  }
+  expect(metersOf(usage, now)).toEqual([
+    { label: 'context', percent: 48, note: '96k/200k' },
+    { label: '5h', percent: 19, note: '2:40pm' },
+    { label: '7d', percent: 23 },
+  ])
+  expect(metersOf({ ...usage, tokens: undefined }, now)[0]).toEqual({ label: 'context', percent: 48 })
+})
+
+test('the breakdown keeps what fills the window, largest first, as shares of it', async () => {
+  const parts = partsOf([
+    { name: 'System prompt', tokens: 9_000 },
+    { name: 'Messages', tokens: 61_000 },
+    { name: 'Memory files', tokens: 8_000 },
+    { name: 'System tools', tokens: 22_000 },
+    { name: 'Slash commands', tokens: 0 },
+  ])
+
+  expect(parts.map(part => `${part.label} ${part.share}`)).toEqual(['msgs 61', 'tools 22', 'sys 9', 'memory 8'])
+  expect(parts[0]?.slot).toBe('user')
+  expect(partsOf([])).toEqual([])
 })
 
 test('a long cell wraps on its words, breaks a word too long for the column, and caps its lines', async () => {
@@ -374,7 +461,8 @@ test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async
         }
 
         // A meter's fill reads at 3:1 against the page and against its track.
-        for (const fill of [palette.user, palette.warn, palette.err]) {
+        // So does each segment of the context breakdown bar.
+        for (const fill of [palette.user, palette.warn, palette.err, ...PART_SLOTS.map(slot => palette[slot])]) {
           const track = over(palette.muted, TRACK_OPACITY, bg)
           expect(`${skin.name} ${mode} ${fill} ${Math.min(contrast(fill, bg), contrast(fill, track)) >= 3}`).toBe(`${skin.name} ${mode} ${fill} true`)
         }

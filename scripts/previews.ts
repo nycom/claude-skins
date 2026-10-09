@@ -13,7 +13,7 @@ import { diffSvg } from '../hooks/svg-diff'
 import { escape, FONT, MONO } from '../hooks/svg-kit'
 import { tableSvg } from '../hooks/svg-table'
 import { terminalSvg } from '../hooks/svg-terminal'
-import { usageSvg } from '../hooks/svg-usage'
+import { partsOf, usageSvg } from '../hooks/svg-usage'
 import noir from '../hooks/themes/noir'
 
 const OUT = join(import.meta.dirname, '..', 'docs', 'previews')
@@ -121,7 +121,7 @@ for (const [theme, palette] of [
   write(`spinners-${theme}`, spinners(palette))
   write(`terminal-${theme}`, terminalSvg({ stdout: ' Test Files  12 passed (12)\n      Tests  148 passed (148)\n   Duration  3.41s', stderr: '', interrupted: false }, false, palette, WIDTH))
   write(`code-${theme}`, codeSvg(['// Rate limit per route, keyed by user', 'export function limit(route: string, perMinute = 60) {', '  const used = new Map<string, number>()', '  return (user: string) => (used.get(user) ?? 0) < perMinute', '}'].join('\n'), 'ts', palette, WIDTH))
-  write(`usage-${theme}`, usageSvg([{ label: 'context', percent: 42 }, { label: '5h', percent: 18 }, { label: '7d', percent: 61 }], palette).source)
+  write(`usage-${theme}`, usageSvg([{ label: 'context', percent: 42, note: '84k/200k' }, { label: '5h', percent: 18, note: '2:40pm' }, { label: '7d', percent: 61, note: 'Mon 9:00am' }], palette, [], false, partsOf([{ name: 'Messages', tokens: 51_000 }, { name: 'System tools', tokens: 19_000 }, { name: 'System prompt', tokens: 8_000 }, { name: 'Memory files', tokens: 6_000 }])).source)
 }
 
 const page = (background: string, theme: string) =>

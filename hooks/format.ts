@@ -82,3 +82,48 @@ export function clipLines(text: string, head: number, tail: number): string {
     ...lines.slice(lines.length - tail),
   ].join('\n')
 }
+
+// A token count at a glance: `950`, `1.5k`, `96k`, `1.2M`.
+export function compactCount(count: number): string {
+  const thousands = count / 1000
+
+  if (count < 1000) {
+    return String(count)
+  }
+
+  if (Math.round(thousands) < 1000) {
+    return `${Number(thousands.toFixed(thousands < 10 ? 1 : 0))}k`
+  }
+
+  return `${Number((count / 1_000_000).toFixed(1))}M`
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+// When a plan limit resets, by local calendar day: the clock time today (`2:40pm`), then
+// `tmrw 9:00am`, then the weekday (`Sat 9:00am`), and a week off, on today's weekday,
+// `next Fri 9:00am`; so no reset reads as one already gone. Nothing for a missing or
+// unreadable timestamp, or one already past, as the window has since reset.
+export function resetLabel(at: string | undefined, now: number): string | undefined {
+  const date = new Date(at ?? Number.NaN)
+
+  if (Number.isNaN(date.getTime()) || date.getTime() <= now) {
+    return undefined
+  }
+
+  const hours = date.getHours()
+  const time = `${hours % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}${hours < 12 ? 'am' : 'pm'}`
+  const today = new Date(now)
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+  const weekOn = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7)
+
+  if (date.toDateString() === today.toDateString()) {
+    return time
+  }
+
+  if (date.toDateString() === tomorrow.toDateString()) {
+    return `tmrw ${time}`
+  }
+
+  return `${date >= weekOn ? 'next ' : ''}${WEEKDAYS[date.getDay()]} ${time}`
+}

@@ -2,7 +2,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, TurnStats } from '../types'
 import { formatDuration, formatMs } from './format'
-import { columnWidths, cutCell } from './markdown'
+import { columnWidths, cutCell, widthOf } from './markdown'
 import type { Segment, Table } from './markdown'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
@@ -10,12 +10,12 @@ import type { SpinnerMode } from './icons'
 import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
-import { cardWidth } from './svg-kit'
+import { PX_PER_COLUMN, cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { usageLine, usageSvg } from './svg-usage'
-import type { Meter } from './svg-usage'
+import { partCells, usageLine, usageSvg } from './svg-usage'
+import type { Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
 export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button'>
@@ -501,53 +501,103 @@ export const COMPACT_NUDGE = 70
 // (`c: Compact`); the desktop's button is pressed with the pointer.
 export const COMPACT_HOTKEY = 'c'
 
-function meterView(look: Look, meters: readonly Meter[], starts: readonly number[] = [], isPulsing = false) {
+// What the band shows past the rings, by how many of its extras are kept: a narrow band
+// drops the breakdown bar first, then the resets, then the tokens.
+const EXTRAS = 3
+
+function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: number): { meters: Meter[]; parts: readonly Part[] } {
+  return {
+    meters: meters.map(meter => (kept >= 2 || (kept === 1 && meter.label === 'context') ? meter : { label: meter.label, percent: meter.percent })),
+    parts: kept === EXTRAS ? parts : [],
+  }
+}
+
+// The meters with as many extras as fit `room` columns; with none, whatever their width.
+function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[] = [], isPulsing = false) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
-  if (look.svg !== undefined) {
-    const Svg = look.svg
-    const built = usageSvg(meters, palette, starts, isPulsing)
+  for (let kept = EXTRAS; kept >= 0; kept--) {
+    const view = keptExtras(meters, parts, kept)
 
-    return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
+    if (look.svg !== undefined) {
+      const Svg = look.svg
+      const built = usageSvg(view.meters, palette, starts, isPulsing, view.parts)
+
+      if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
+        return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
+      }
+
+      continue
+    }
+
+    const line = usageLine(view.meters)
+    const cells = partCells(view.parts)
+    const items = [...line.map(meter => meter.bar + meter.text), ...(cells.length > 0 ? [cells.map(cell => cell.cells).join('')] : [])]
+    const width = items.reduce((sum, item) => sum + widthOf(item), 3 * (items.length - 1))
+
+    if (kept === 0 || width <= room) {
+      return (
+        <Box flexDirection="row" columnGap={3}>
+          {line.map(meter => (
+            <Text color={palette.muted}>
+              <Text color={palette.user}>{meter.bar}</Text>
+              {meter.text}
+            </Text>
+          ))}
+          {cells.length > 0 ? (
+            <Text>
+              {cells.map(cell => (
+                <Text color={palette[cell.slot]}>{cell.cells}</Text>
+              ))}
+            </Text>
+          ) : (
+            ''
+          )}
+        </Box>
+      )
+    }
   }
-
-  return (
-    <Box flexDirection="row" columnGap={3}>
-      {usageLine(meters).map(meter => (
-        <Text color={palette.muted}>
-          <Text color={palette.user}>{meter.bar}</Text>
-          {` ${meter.percent}% ${meter.label}`}
-        </Text>
-      ))}
-    </Box>
-  )
 }
 
 // The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
-// the main action, with a word on why, once the context is full enough to be worth it.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, starts: readonly number[] = []) {
+// the main action, with a word on why, once the context is full enough to be worth it. Extras
+// sit between the two and give way first, so the button never moves for them.
+export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, starts: readonly number[] = [], parts: readonly Part[] = [], columns = Infinity) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
   const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
   const isNudge = context >= COMPACT_NUDGE
   const isOffered = canCompact && context >= COMPACT_SHOW
+  const nudge = `Context is ${context}% full`
+  const label = isNudge ? 'Compact now' : 'Compact'
+  // The gap, and room for the Compact controls whenever the context is full enough for
+  // them, even while a turn hides them, so the extras hold still across turns.
+  const reserved = 2 + (context >= COMPACT_SHOW ? label.length + 6 + 2 : 0) + (isNudge ? nudge.length + 2 : 0)
 
   return (
-    // The right edge stays clear: the band draws its own collapse mark ([-]) there.
-    <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      {meterView(look, meters, starts, isOffered && isNudge)}
+    // bodyColumns already leave out the engine's collapse mark ([-]) at the right edge.
+    <Box flexDirection="row" alignItems="center" columnGap={2}>
+      {meterView(look, meters, parts, columns - reserved, starts, isOffered && isNudge)}
       <Box flexGrow={1} />
-      {isOffered && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
+      {isOffered && isNudge ? (
+        <Box flexShrink={0}>
+          <Text color={palette.warn}>{nudge}</Text>
+        </Box>
+      ) : (
+        ''
+      )}
       {isOffered ? (
-        <Button
-          key="compact"
-          label={isNudge ? 'Compact now' : 'Compact'}
-          {...(look.surface === 'terminal' ? { hotkey: COMPACT_HOTKEY } : {})}
-          plain
-          {...(isNudge ? { variant: 'primary' as const } : { dimColor: true })}
-          onPress={compact}
-        />
+        <Box flexShrink={0}>
+          <Button
+            key="compact"
+            label={label}
+            {...(look.surface === 'terminal' ? { hotkey: COMPACT_HOTKEY } : {})}
+            plain
+            {...(isNudge ? { variant: 'primary' as const } : { dimColor: true })}
+            onPress={compact}
+          />
+        </Box>
       ) : (
         ''
       )}
