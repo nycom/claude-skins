@@ -195,6 +195,13 @@ const freshRows = (e: { surface: RenderSurface; requestId?: string | undefined }
 // more draw settles them.
 const ramp = rampFrom()
 let settle: { cancel(): void } | undefined
+// A reset's label changes at local midnight (`tmrw` to today's time) and when it passes (to
+// none); nothing else redraws the band then, so one timer wakes it at the sooner of the two.
+let relabel: { at: number; timer: { cancel(): void } } | undefined
+const stopRelabel = (): void => {
+  relabel?.timer.cancel()
+  relabel = undefined
+}
 
 // The engine keeps a reply's drawing and shows it again when the reply's row mounts again,
 // as on a scroll back into view, which plays its animation again. So once its rows have
@@ -304,10 +311,11 @@ async function runFolderCommand($: EngineInterface, word: string): Promise<strin
   }
 }
 
-// The breakdown is the local estimate, which sends no requests; when it fails the band
-// goes on without its bar.
+// The breakdown is the local estimate, which sends no requests, asked only while the band
+// draws; when it fails the band goes on without its bar.
 async function refreshUsage($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage({ breakdown: 'summary' }).catch(() => $.session.usage())
+  const isBand = (await activeSkin($))?.prefs.band === true
+  const usage = await (isBand ? $.session.usage({ breakdown: 'summary' }).catch(() => $.session.usage()) : $.session.usage())
   const categories = usage.context.breakdown?.categories
   const snap: UsageSnap = {
     context: usage.context.percent ?? null,
@@ -359,6 +367,7 @@ export const register: Register = on => {
     await load($)
     await refreshUsage($)
     await readConfig($, config)
+    stopRelabel()
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -378,6 +387,7 @@ export const register: Register = on => {
   // /clear, /resume and /branch reset $.state to its defaults and skip session.start.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await load($)
+    stopRelabel()
     await readConfig($, config)
 
     return next(e)
@@ -734,6 +744,8 @@ reply width: ${lastColumns} columns`
     const meters = metersOf(usage, now)
 
     if (active === null || !active.prefs.band || e.props.hasSurvey || meters.length === 0) {
+      // Nothing drawn, so nothing to relabel; the band's next draw arms it again.
+      stopRelabel()
       return next(e)
     }
 
@@ -741,7 +753,12 @@ reply width: ${lastColumns} columns`
     const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
     const look = { ...lookOf($.ui.resolve(e), active, e.surface), now: isGrowing ? since : now }
     const { Box } = look.ui
+    // With no mod's row above, what comes back is the engine's own band, by reference, which
+    // draws nothing without a survey; it is left out, so no empty row or gap sits above the rings.
+    // ponytail: only that bare pass-through is known to draw nothing; a mod's own Box around it
+    // may be its padding, border or height, so it keeps the gap. Look inside if a mod wraps it.
     const theirs = await next(e)
+    const above = theirs.type === 'engine' ? null : theirs
     // Compacting mid-turn would cut the turn's own context out from under it.
     // Runs Claude Code's own /compact, so the person sees its usual progress and result.
     // Work a press starts is abandoned when the press ends, which cancels a compaction
@@ -766,9 +783,23 @@ reply width: ${lastColumns} columns`
       })
     }
 
+    const today = new Date(now)
+    const resets = usage.limits.map(limit => Date.parse(limit.resetsAt ?? '')).filter(at => at > now)
+    const due = Math.min(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), ...resets)
+    if (resets.length > 0 && relabel?.at !== due) {
+      stopRelabel()
+      relabel = {
+        at: due,
+        timer: $.clock.after(due - now, () => {
+          relabel = undefined
+          return update($, usageAtom, usage => ({ ...usage }))
+        }),
+      }
+    }
+
     return (
-      <Box flexDirection="column" rowGap={theirs && look.surface === 'desktop' ? 1 : 0}>
-        {theirs}
+      <Box flexDirection="column" rowGap={above !== null && look.surface === 'desktop' ? 1 : 0}>
+        {above}
         {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
       </Box>
     )

@@ -100,20 +100,30 @@ export function compactCount(count: number): string {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-// When a plan limit resets, in local time: the clock time within a day (`2:40pm`), else the
-// weekday (`Mon`). Nothing for a missing or unreadable timestamp.
+// When a plan limit resets, by local calendar day: the clock time today (`2:40pm`), then
+// `tmrw 9:00am`, then the weekday (`Sat 9:00am`), and a week off, on today's weekday,
+// `next Fri 9:00am`; so no reset reads as one already gone. Nothing for a missing or
+// unreadable timestamp, or one already past, as the window has since reset.
 export function resetLabel(at: string | undefined, now: number): string | undefined {
   const date = new Date(at ?? Number.NaN)
 
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(date.getTime()) || date.getTime() <= now) {
     return undefined
   }
 
-  if (date.getTime() - now >= 24 * 60 * 60 * 1000) {
-    return WEEKDAYS[date.getDay()]
+  const hours = date.getHours()
+  const time = `${hours % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}${hours < 12 ? 'am' : 'pm'}`
+  const today = new Date(now)
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+  const weekOn = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7)
+
+  if (date.toDateString() === today.toDateString()) {
+    return time
   }
 
-  const hours = date.getHours()
+  if (date.toDateString() === tomorrow.toDateString()) {
+    return `tmrw ${time}`
+  }
 
-  return `${hours % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}${hours < 12 ? 'am' : 'pm'}`
+  return `${date >= weekOn ? 'next ' : ''}${WEEKDAYS[date.getDay()]} ${time}`
 }

@@ -1,5 +1,6 @@
 import type { UsageSnap } from '../types'
 import { compactCount, resetLabel } from './format'
+import { channels } from './light'
 import type { Palette, Slot } from './skin'
 import { escape, FONT, loopDelay, measure, still } from './svg-kit'
 
@@ -22,9 +23,6 @@ export type Meter = { label: string; percent: number; note?: string }
 
 // One part of what fills the context, as its share of it in percent.
 export type Part = { label: string; share: number; slot: Slot }
-
-// The breakdown bar, and whether its largest parts are named after it.
-export type Breakdown = { parts: readonly Part[]; isLabelled: boolean }
 
 // How long after a new reading the rings grow; past it they are drawn settled.
 export const SETTLE_MS = 1200
@@ -73,7 +71,7 @@ export function limitLabel(kind: string): string {
   return name.replace(/_/g, ' ')
 }
 
-// `now` places each reset as a time today or a weekday further off.
+// `now` places each reset as a time today, tomorrow or on a weekday further off.
 export function metersOf(usage: UsageSnap, now: number): Meter[] {
   const tokens = usage.tokens === undefined || usage.window === undefined ? undefined : `${compactCount(usage.tokens)}/${compactCount(usage.window)}`
 
@@ -115,10 +113,6 @@ export function partsOf(parts: readonly { name: string; tokens: number }[]): Par
     }))
 }
 
-// The largest parts, named: `msgs 61%`.
-export const NAMED_PARTS = 3
-export const partNames = (parts: readonly Part[]): string[] => parts.slice(0, NAMED_PARTS).map(part => `${part.label} ${part.share}%`)
-
 // Where each part starts and ends along a bar `width` long.
 function partSpans(parts: readonly Part[], width: number): { part: Part; from: number; to: number }[] {
   const total = parts.reduce((sum, part) => sum + part.share, 0)
@@ -129,6 +123,17 @@ function partSpans(parts: readonly Part[], width: number): { part: Part; from: n
     done += part.share
     return { part, from, to: Math.round((width * done) / total) }
   })
+}
+
+// On a skin where two or more parts share one colour exactly, as noir does, the parts step
+// down in opacity in part order so they still tell apart; the first three hold 3:1 on the
+// track and the page. Colours that are only near each other stay at full strength.
+const STEPS = [1, 0.8, 0.62, 0.48, 0.38]
+const partOpacities = (parts: readonly Part[], palette: Palette): number[] => {
+  const colours = parts.map(part => channels(palette[part.slot]).join())
+  const isShared = new Set(colours).size < colours.length
+
+  return parts.map((_, i) => (isShared ? (STEPS[Math.min(i, STEPS.length - 1)] ?? 1) : 1))
 }
 
 // Accent while there is room; the warning colour from 80 %, the error colour from 95 %.
@@ -171,7 +176,7 @@ const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${m
 // `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
 // The breakdown bar follows the rings; it never animates. `now` is when the band is drawn, in
 // ms: a redraw is a new image, so the chases and the dim pick up where they were (see loopDelay).
-export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], breakdown?: Breakdown, now?: number): { source: string; width: number; height: number; alt: string } {
+export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], parts: readonly Part[] = [], now?: number): { source: string; width: number; height: number; alt: string } {
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
   const lefts: number[] = []
@@ -235,25 +240,21 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
 
   let bar = ''
 
-  if (breakdown !== undefined && breakdown.parts.length > 0) {
+  if (parts.length > 0) {
     const left = width + 4
     const top = CY - BAR_H / 2
+    const opacities = partOpacities(parts, palette)
     // A 1px gap parts the segments, so they read apart even where a skin gives them one colour.
-    const segments = partSpans(breakdown.parts, BAR_W)
+    const segments = partSpans(parts, BAR_W)
+      .map((span, i) => ({ ...span, i }))
       .filter(span => span.to - span.from > 1)
-      .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}"/>`)
-    const names = breakdown.isLabelled
-      ? `<text x="${left + BAR_W + 8}" y="${CY + 4}" font-size="12">${partNames(breakdown.parts)
-          .map((name, i) => `${i === 0 ? '' : `<tspan style="fill:${palette.muted}"> · </tspan>`}<tspan style="fill:${palette[breakdown.parts[i]?.slot ?? 'other']}">${escape(name)}</tspan>`)
-          .join('')}</text>`
-      : ''
+      .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}" fill-opacity="${opacities[span.i]}"/>`)
 
     bar = [
       `<rect x="${left}" y="${top}" width="${BAR_W}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${palette.muted}" fill-opacity="${TRACK_OPACITY}"/>`,
       ...segments,
-      names,
     ].join('')
-    width = left + BAR_W + (breakdown.isLabelled ? 8 + Math.ceil(measure(partNames(breakdown.parts).join(' · '), false, 12)) : 0) + 4
+    width = left + BAR_W + 4
   }
 
   const style = [
@@ -267,8 +268,8 @@ export function usageSvg(meters: readonly Meter[], palette: Palette, starts: rea
     width,
     height,
     alt: [
-      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note})`}`).join(', '),
-      ...(bar === '' || breakdown === undefined ? [] : [`context holds ${partNames(breakdown.parts).join(', ')}`]),
+      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note.replace(/^tmrw/, 'tomorrow')})`}`).join(', '),
+      ...(bar === '' ? [] : [`context holds ${parts.map(part => `${part.label} ${part.share}%`).join(', ')}`]),
     ].join('; '),
   }
 }
