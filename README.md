@@ -54,13 +54,17 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | Rings for context and each plan limit, a Compact button from 50% context, and a nudge to compact from 70%, the context ring pulsing softly | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
+| Above the prompt | A band as tall as the PR bar and the input: rings for context and each plan limit, a Compact button from 50% context, and from 70% a "Compact now" nudge with a soft halo pulsing on the context ring | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
 
-Every card rises in row by row, the last row starting within a quarter second of the first. Reduced
-motion holds the icons, the cards and the band's rings still, whether it is the system's setting or
+A card rises in row by row on its first draw only, the last row starting within a quarter second of
+the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
+theme change) never replays it. A table that streams in rises only the rows added since its last draw.
+The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s
+after a change the band settles still, so nothing replays. Reduced motion holds the icons, the cards,
+the band's rings and the pulse still, whether it is the system's setting or
 Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each Copy button says what it
 copies: table, code, diff or output. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
