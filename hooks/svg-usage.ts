@@ -1,6 +1,6 @@
 import type { UsageSnap } from '../types'
 import type { Palette } from './skin'
-import { escape, FONT } from './svg-kit'
+import { escape, FONT, still } from './svg-kit'
 
 // The band above the prompt: how full the context window is and how much of each plan
 // limit is spent, as rings that fill in when they draw.
@@ -59,7 +59,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette): { source: 
     `text{font-family:${FONT}}`,
     '.fill{animation:fill .9s cubic-bezier(.2,.8,.2,1)}',
     '@keyframes fill{from{stroke-dasharray:0 100}}',
-    '@media (prefers-reduced-motion:reduce){.fill{animation:none}}',
+    still(),
   ].join('')
 
   return {

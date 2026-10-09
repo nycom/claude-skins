@@ -659,6 +659,10 @@ test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards 
   expect(holdsStill(((await card.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
   await card.unmount()
 
+  const band = await $.ui.mount(BAND('desktop', false))
+  expect(holdsStill(((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
+  await band.unmount()
+
   // Turned off again, only the system's preference holds them still.
   reduces = false
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
