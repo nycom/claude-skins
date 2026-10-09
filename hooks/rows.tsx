@@ -315,45 +315,52 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
   )
 }
 
-// A card drawn as an image, with its Copy button laid over the top-right corner the card
-// left free. The image cannot be pressed, so the button is a real one on top of it; the
-// box hugs the image so the corner is the card's, not the column's.
-function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string) {
-  const { Box, Button } = look.ui
-  const copy = look.copy
+// A card's Copy button laid over its top-right corner, level with its header, in the
+// slot the card leaves free there; nothing where nothing can copy. The image cannot be
+// pressed, so the button is a real one on top of it.
+function copyOverlay(look: Look, key: string, text: string) {
+  const { Box } = look.ui
+  const button = copyButton(look, key, text)
 
-  return (
-    <Box marginY={1} alignSelf="flex-start">
-      <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
-      {copy === undefined ? (
-        ''
-      ) : (
-        <Box position="absolute" top={1} right={3}>
-          <Button key={key} label={look.icons.copy} plain dimColor onPress={() => copy(text)} />
-        </Box>
-      )}
+  return button === undefined ? (
+    ''
+  ) : (
+    <Box position="absolute" top={1} right={3}>
+      {button}
     </Box>
   )
 }
 
-// A table card with its links and Copy button under it, not over it: the card's header is
-// its columns' labels, with no corner to spare. The image cannot be pressed, so its links
-// are pressed here.
+// A card drawn as an image with its Copy button over it; the box hugs the image so the
+// corner is the card's, not the column's.
+function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string) {
+  const { Box } = look.ui
+
+  return (
+    <Box marginY={1} alignSelf="flex-start">
+      <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
+      {copyOverlay(look, key, text)}
+    </Box>
+  )
+}
+
+// A table card, its Copy button over the header row's right end and its links under it:
+// the image cannot be pressed, so its links are pressed here.
 function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string, fresh?: number) {
   const { Box, Link } = look.ui
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), fresh)
+  const card = tableSvg(table, look.skin.palette, cardWidth(columns), fresh, look.copy !== undefined)
   const links = new Map(table.rows.flat().flatMap(cell => [...cell.matchAll(LINK)].map(([, label = '', href = '']) => [href, label] as const)))
 
   return (
     <Box flexDirection="column" marginY={1} alignSelf="flex-start">
-      <Svg source={card.source} alt={card.alt} width={card.width} height={card.height} />
-      <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
-        <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-          {[...links].map(([href, label]) => (
-            <Link href={href} label={label} />
-          ))}
-        </Box>
-        {copyButton(look, key, tableMarkdown(table)) ?? ''}
+      <Box alignSelf="flex-start">
+        <Svg source={card.source} alt={card.alt} width={card.width} height={card.height} />
+        {copyOverlay(look, key, tableMarkdown(table))}
+      </Box>
+      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+        {[...links].map(([href, label]) => (
+          <Link href={href} label={label} />
+        ))}
       </Box>
     </Box>
   )
@@ -363,7 +370,7 @@ function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, k
 const tableMarkdown = (table: Table): string =>
   [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
 
-// A table's copy button, an icon; nothing where nothing can copy.
+// A copy button, an icon; nothing where nothing can copy.
 function copyButton(look: Look, key: string, text: string) {
   const { Button } = look.ui
   const copy = look.copy

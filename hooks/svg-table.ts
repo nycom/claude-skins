@@ -1,7 +1,7 @@
 import { LINK } from './markdown'
 import type { Align, Table } from './markdown'
 import type { Palette } from './skin'
-import { escape, measure as measureAt, MONO, staggerMs, svgCard } from './svg-kit'
+import { CONTROL_SLOT, escape, measure as measureAt, MONO, staggerMs, svgCard } from './svg-kit'
 
 // A table as an animated vector card in the skin's colours, with no background of its
 // own so the page shows through, for the surfaces that draw `Svg` (the desktop app).
@@ -104,12 +104,24 @@ export function wrapCell(text: string, width: number, isMono: boolean, size = SI
   return all.length === 0 ? [''] : all
 }
 
-function naturalWidths(table: Table): number[] {
+// Width of what a cell holds: all of it, or with `isWord` its longest word, the narrowest
+// its column can be without breaking one. Colours, diffs and numbers never wrap.
+function cellWidth(cell: string, isWord: boolean): number {
+  const kind = kindOfCell(cell)
+  const isWrapped = isWord && (kind === 'text' || kind === 'code')
+  const parts = isWrapped ? cell.split(/\s+/) : [cell]
+
+  return Math.max(0, ...parts.map(part => measure(part, isMonoKind(kind)))) + (kind === 'colour' ? 22 : 0)
+}
+
+// Per column, its widest cell or header, or with `isWord` its widest word; the last column
+// keeps `reserve` more beside its header, the corner a control is laid over.
+function columnWidthsOf(table: Table, isWord: boolean, reserve: number): number[] {
   return table.header.map((header, col) => {
-    const cells = table.rows.map(row => row[col] ?? '')
+    const head = (isWord ? header.toUpperCase().split(/\s+/) : [header.toUpperCase()]).map(part => measure(part, false, HEAD_MEASURE))
     const widest = Math.max(
-      measure(header.toUpperCase(), false, HEAD_MEASURE),
-      ...cells.map(cell => measure(cell, isMonoKind(kindOfCell(cell))) + (kindOfCell(cell) === 'colour' ? 22 : 0)),
+      Math.max(...head) + (col === table.header.length - 1 ? reserve : 0),
+      ...table.rows.map(row => cellWidth(row[col] ?? '', isWord)),
     )
 
     return Math.max(MIN_COL, Math.ceil(widest))
@@ -118,8 +130,10 @@ function naturalWidths(table: Table): number[] {
 
 // Columns that fit their fair share keep their natural width; the rest share what is
 // left in proportion to how much they hold, and wrap. With room to spare, every column
-// stretches in proportion, so the card spans its width.
-export function fitColumns(natural: readonly number[], width: number): number[] {
+// stretches in proportion, so the card spans its width. A column is never narrower than
+// its `least` (its longest word) while the columns' leasts fit: the widest give way first.
+// Only a word wider than the whole table breaks.
+export function fitColumns(natural: readonly number[], width: number, least: readonly number[] = []): number[] {
   const room = width - PAD_X * 2 - COL_GAP * (natural.length - 1)
   const total = natural.reduce((sum, w) => sum + w, 0)
 
@@ -131,8 +145,34 @@ export function fitColumns(natural: readonly number[], width: number): number[] 
   const fixed = natural.reduce((sum, w) => sum + (w <= fair ? w : 0), 0)
   const flexTotal = natural.reduce((sum, w) => sum + (w > fair ? w : 0), 0)
   const flexRoom = Math.max(0, room - fixed)
+  const shared = natural.map(w => (w <= fair ? w : Math.max(MIN_COL, (flexRoom * w) / flexTotal)))
+  const floors = natural.map((_, i) => Math.min(least[i] ?? 0, room))
+  const floorTotal = floors.reduce((sum, w) => sum + w, 0)
 
-  return natural.map(w => (w <= fair ? w : Math.max(MIN_COL, (flexRoom * w) / flexTotal)))
+  if (shared.every((w, i) => w >= (floors[i] ?? 0))) {
+    return shared
+  }
+
+  if (floorTotal > room) {
+    return floors.map(w => (w * room) / floorTotal)
+  }
+
+  // The level the widest columns are cut down to, found by halving.
+  const fit = (level: number) => shared.map((w, i) => Math.max(floors[i] ?? 0, Math.min(w, level)))
+  let low = 0
+  let high = Math.max(...shared)
+
+  for (let step = 0; step < 40; step++) {
+    const level = (low + high) / 2
+
+    if (fit(level).reduce((sum, w) => sum + w, 0) > room) {
+      high = level
+    } else {
+      low = level
+    }
+  }
+
+  return fit(low)
 }
 
 const anchorOf = (align: Align): string => (align === 'right' ? 'end' : align === 'center' ? 'middle' : 'start')
@@ -184,18 +224,22 @@ function cellMarkup(cell: Cell, left: number, width: number, align: Align, rowH:
 
 // `width` is the room the reply gives the card, in pixels; it is clamped to a sane range.
 // `fresh` is the first row new since the card's last draw: on a redraw only rows from it
-// on rise in, their stagger starting at once.
-export function tableSvg(table: Table, palette: Palette, width: number, fresh?: number): SvgTable {
+// on rise in, their stagger starting at once. `hasControl` keeps the header row's right
+// end free for a Copy button laid over it.
+export function tableSvg(table: Table, palette: Palette, width: number, fresh?: number, hasControl = false): SvgTable {
   const cardWidth = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)))
+  const reserve = hasControl ? CONTROL_SLOT : 0
   const shownRows = table.rows.map(row => row.map(showLinks))
-  const widths = fitColumns(naturalWidths({ ...table, rows: shownRows }), cardWidth)
+  const shown = { ...table, rows: shownRows }
+  const widths = fitColumns(columnWidthsOf(shown, false, reserve), cardWidth, columnWidthsOf(shown, true, reserve))
   const lefts = widths.map((_, i) => PAD_X + widths.slice(0, i).reduce((sum, w) => sum + w + COL_GAP, 0))
   const align = (i: number): Align => table.align[i] ?? 'left'
 
   const laid = shownRows.map(row => row.map((cell, i) => layoutCell(cell, (widths[i] ?? MIN_COL) - (kindOfCell(cell) === 'colour' ? 22 : 0))))
   const heights = laid.map(cells => Math.max(MIN_ROW_H, Math.max(...cells.map(cell => cell.lines.length)) * LINE_H + ROW_PAD_Y * 2))
   // A header too long for its column wraps, and the header grows to hold it.
-  const heads = table.header.map((cell, i) => wrapCell(cell.toUpperCase(), widths[i] ?? MIN_COL, false, HEAD_MEASURE))
+  const headWidth = (i: number): number => (widths[i] ?? MIN_COL) - (i === widths.length - 1 ? reserve : 0)
+  const heads = table.header.map((cell, i) => wrapCell(cell.toUpperCase(), headWidth(i), false, HEAD_MEASURE))
   const headerH = HEADER_H + (Math.max(...heads.map(lines => lines.length)) - 1) * HEAD_LINE_H
   const tops = heights.map((_, r) => headerH + heights.slice(0, r).reduce((sum, h) => sum + h, 0))
   const height = headerH + heights.reduce((sum, h) => sum + h, 0) + 6
@@ -205,7 +249,7 @@ export function tableSvg(table: Table, palette: Palette, width: number, fresh?: 
       lines
         .map(
           (text, l) =>
-            `<text x="${xOf(lefts[i] ?? 0, widths[i] ?? 0, align(i))}" y="${headerH / 2 + 4 + (l - (lines.length - 1) / 2) * HEAD_LINE_H}" text-anchor="${anchorOf(align(i))}" class="head">${escape(text)}</text>`,
+            `<text x="${xOf(lefts[i] ?? 0, headWidth(i), align(i))}" y="${headerH / 2 + 4 + (l - (lines.length - 1) / 2) * HEAD_LINE_H}" text-anchor="${anchorOf(align(i))}" class="head">${escape(text)}</text>`,
         )
         .join(''),
     )
@@ -237,7 +281,7 @@ export function tableSvg(table: Table, palette: Palette, width: number, fresh?: 
 
   const body = [
     header,
-    `<line class="rule" x1="${PAD_X}" y1="${headerH - 1}" x2="${cardWidth - PAD_X}" y2="${headerH - 1}" stroke="${palette.user}" stroke-width="1" stroke-linecap="square"/>`,
+    `<line class="rule" x1="${PAD_X}" y1="${headerH - 1}" x2="${cardWidth - PAD_X - reserve}" y2="${headerH - 1}" stroke="${palette.user}" stroke-width="1" stroke-linecap="square"/>`,
     rows,
   ].join('')
 

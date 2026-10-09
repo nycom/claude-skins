@@ -451,6 +451,27 @@ test('short columns keep their width and long ones share the rest', async () => 
   expect(Math.round((why ?? 0) + 20 + 60 + 2 * 28 + 2 * 24)).toBe(700)
 })
 
+test('a column is never narrower than its longest word while the table has room, the widest columns giving way', async () => {
+  const long = 'the unit restarts it on failure with a five second backoff, which held when the process was killed twice'
+  const card = tableSvg(
+    { kind: 'table', header: ['Directory marketplaces', 'What', 'Why'], align: ['left', 'left', 'left'], rows: [['Directory marketplaces', long, `${long} ${long}`]] },
+    tokyoNight.palette,
+    600,
+  )
+  const lines = [...card.source.matchAll(/>([^<>]+)</g)].map(m => m[1])
+
+  for (const word of ['DIRECTORY', 'MARKETPLACES', 'Directory', 'marketplaces']) {
+    expect(lines.some(line => line?.split(' ').includes(word))).toBe(true)
+  }
+  // Two short columns are raised to their words; the wide one gives up the width.
+  const [first, second, third] = fitColumns([300, 40, 900], 600, [150, 40, 80])
+  expect(first).toBeGreaterThanOrEqual(150)
+  expect(second).toBe(40)
+  expect(Math.round((first ?? 0) + (second ?? 0) + (third ?? 0))).toBe(600 - 2 * 28 - 2 * 24)
+  // A word wider than the whole table still breaks.
+  expect(fitColumns([2000], 600, [2000])).toEqual([552])
+})
+
 test('a light palette is derived with dark text, light bands and deepened colours', async () => {
   const light = toLight(tokyoNight.palette)
 

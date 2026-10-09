@@ -122,9 +122,9 @@ export const riseDelay = (index: number, stepMs: number, startMs = 80): string =
 
 const RADIUS = 12
 
-// The room a card leaves in its top-right corner for a Copy button laid over it, sized
-// for the longest label, `Copy output`.
-export const CONTROL_SLOT = 124
+// The room a card leaves at the right end of its header row for the Copy button laid
+// over it: the one-glyph icon and a gap.
+export const CONTROL_SLOT = 44
 
 // Where a header's labels centre: the line the Copy button laid over a card sits on,
 // one text row down from the card's top edge.

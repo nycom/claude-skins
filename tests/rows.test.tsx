@@ -3,7 +3,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
-import { PX_PER_COLUMN } from '../hooks/svg-kit'
+import { CONTROL_SLOT, PX_PER_COLUMN } from '../hooks/svg-kit'
+import { codeSvg } from '../hooks/svg-code'
+import { measure } from '../hooks/svg-table'
 import { ICONS } from '../hooks/skin'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
@@ -848,22 +850,39 @@ const svgOf = async (ui: { find: (q: { type: string }) => Promise<unknown> }) =>
 // Every text a card draws, its lines joined by spaces.
 const drawnText = (source: string) => [...source.matchAll(/>([^<>]+)</g)].map(m => m[1]).join(' ')
 
-test('a desktop table card spans its columns: Copy sits under the card, not in a column of its own', async ($, on) => {
+test('a desktop table card keeps Copy in its top-right corner, over the header row, with no column of its own', async ($, on) => {
   stubEngine(on)
   const copied: string[] = []
   on('ui.copy', ($, e) => (copied.push(e.text), { value: { isCopied: true } }))
   const ui = await $.ui.mount(desktopReply('span-tb', '| Client | Where |\n| --- | --- |\n| Robot | Pi |'))
   const { source, width } = await svgOf(ui)
-  type Node = { props?: Record<string, unknown>; children?: readonly unknown[] }
-  const overlays = (node: unknown): number =>
-    typeof node !== 'object' || node === null ? 0 : ((node as Node).props?.position === 'absolute' ? 1 : 0) + ((node as Node).children ?? []).reduce<number>((sum, child) => sum + overlays(child), 0)
+  type Node = { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
+  const reply = (await ui.find({ type: 'Box' })) as Node
+  const card = reply.children?.[0]?.children?.[0]
+  const overlay = card?.children?.[1]
 
-  // The header's rule runs the card's full width, less its padding: no slot kept free for Copy.
-  expect(source).toContain(`class="rule" x1="24" y1="57" x2="${width - 24}"`)
-  expect(overlays(await ui.find({ type: 'Box' }))).toBe(0)
+  // Laid over the card itself, one row down: level with the header.
+  expect(card?.children?.[0]?.type).toBe('Svg')
+  expect(card?.props?.alignSelf).toBe('flex-start')
+  expect(overlay?.props).toMatchObject({ position: 'absolute', top: 1, right: 3 })
+  expect(overlay?.children?.[0]?.type).toBe('Button')
+  // The header's rule runs the card's width less its padding and the icon's slot only.
+  expect(CONTROL_SLOT).toBeLessThanOrEqual(48)
+  expect(source).toContain(`class="rule" x1="24" y1="57" x2="${width - 24 - CONTROL_SLOT}"`)
+  // Two columns, the last header clear of the icon: no phantom third column.
+  const heads = [...source.matchAll(/<text x="([\d.]+)"[^>]*class="head">([^<]+)</g)].map(m => [Number(m[1]), m[2]] as const)
+  expect(heads.map(([, text]) => text)).toEqual(['CLIENT', 'WHERE'])
+  expect(heads.every(([x, text]) => x + measure(text ?? '', false, 14) <= width - 24 - CONTROL_SLOT)).toBe(true)
   await ui.press({ key: 'copy-0' })
   expect(copied).toEqual(['| Client | Where |\n| --- | --- |\n| Robot | Pi |'])
   await ui.unmount()
+})
+
+test('code cards keep only an icon-sized corner free for Copy', async () => {
+  const card = codeSvg('const a = 1', 'ts', tokyoNight.palette, 600, true)
+
+  expect(CONTROL_SLOT).toBeLessThanOrEqual(48)
+  expect(card.source).toContain(`<text x="${600 - 16 - CONTROL_SLOT}"`)
 })
 
 test('a desktop table card copies with a dim one-glyph icon, ascii in ascii mode', async ($, on) => {
