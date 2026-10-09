@@ -51,22 +51,43 @@ const PX_PER_COLUMN = 6.4
 export const cardWidth = (columns: number, min = 480, max = 1600): number =>
   Math.round(Math.min(max, Math.max(min, columns * PX_PER_COLUMN)))
 
-// Rows that rise in one after another, honouring reduced motion.
+// Rows that rise in one after another, honouring reduced motion. Rows are visible by
+// default: the animation's `both` fill hides one only while its delay runs.
 export const MOTION = [
-  '.rise{opacity:0;animation:rise .45s cubic-bezier(.2,.8,.2,1) forwards}',
+  '.rise{animation:rise .45s cubic-bezier(.2,.8,.2,1) both}',
   '.card{animation:fade .3s ease-out}',
   '@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1}}',
   '@keyframes fade{from{opacity:0}to{opacity:1}}',
   '@media (prefers-reduced-motion:reduce){.rise,.card{animation:none;opacity:1}}',
 ].join('')
 
+// However many rows a card has, the last starts rising within this of the first.
+export const MAX_STAGGER_MS = 250
+
+export const staggerMs = (index: number, stepMs: number): number => Math.min(index * stepMs, MAX_STAGGER_MS)
+
+// ponytail: module state, set from Claude Code's Reduce motion setting each time it is read,
+// so every card and icon drawn after holds still; a per-render flag would thread through
+// every builder.
+let isStill = false
+
+export const holdStill = (on: boolean): void => {
+  isStill = on
+}
+
+// Holds every animation still: always under Claude Code's Reduce motion, else when the
+// system asks for reduced motion.
+export const still = (): string =>
+  isStill ? '*{animation:none!important}' : '@media (prefers-reduced-motion:reduce){*{animation:none!important}}'
+
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
-  `style="animation-delay:${startMs + index * stepMs}ms"`
+  `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
 
 const RADIUS = 12
 
-// The room a card leaves in its top-right corner for a Copy button laid over it.
-export const CONTROL_SLOT = 84
+// The room a card leaves in its top-right corner for a Copy button laid over it, sized
+// for the longest label, `Copy output`.
+export const CONTROL_SLOT = 124
 
 // Where a header's labels centre: the line the Copy button laid over a card sits on,
 // one text row down from the card's top edge.
@@ -82,9 +103,9 @@ export function svgCard(width: number, height: number, palette: Palette, style: 
     `<defs><clipPath id="${clip}"><rect width="${width}" height="${height}" rx="${RADIUS}"/></clipPath></defs>`,
     // Sans for text that names no font of its own: a CSS rule on all text would beat the
     // monospace attribute on code, paths and output.
-    `<style>text{fill:${palette.fg}}text:not([font-family]){font-family:${FONT}}${MOTION}${style}</style>`,
+    `<style>text{fill:${palette.fg}}text:not([font-family]){font-family:${FONT}}${MOTION}${style}${still()}</style>`,
     `<g class="card"><g clip-path="url(#${clip})">${body}</g>`,
-    `<rect x=".5" y=".5" width="${width - 1}" height="${height - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${palette.fg}" stroke-opacity=".16"/></g>`,
+    `<rect x=".5" y=".5" width="${width - 1}" height="${height - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${palette.fg}" stroke-opacity=".3"/></g>`,
     `</svg>`,
   ].join('')
 }

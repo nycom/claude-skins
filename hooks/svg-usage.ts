@@ -1,6 +1,6 @@
 import type { UsageSnap } from '../types'
 import type { Palette } from './skin'
-import { escape, FONT } from './svg-kit'
+import { escape, FONT, still } from './svg-kit'
 
 // The band above the prompt: how full the context window is and how much of each plan
 // limit is spent, as rings that fill in when they draw.
@@ -48,7 +48,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette): { source: 
       const color = meterColor(meter.percent, palette)
 
       return [
-        `<circle cx="${x}" cy="15" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity=".25" stroke-width="3"/>`,
+        `<circle cx="${x}" cy="15" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity=".75" stroke-width="3"/>`,
         `<circle class="fill" cx="${x}" cy="15" r="${RING_R}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} 15)" style="--len:${filled}"/>`,
         `<text x="${x + RING_R + 8}" y="19.5" font-size="12.5"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}</tspan></text>`,
       ].join('')
@@ -59,7 +59,7 @@ export function usageSvg(meters: readonly Meter[], palette: Palette): { source: 
     `text{font-family:${FONT}}`,
     '.fill{animation:fill .9s cubic-bezier(.2,.8,.2,1)}',
     '@keyframes fill{from{stroke-dasharray:0 100}}',
-    '@media (prefers-reduced-motion:reduce){.fill{animation:none}}',
+    still(),
   ].join('')
 
   return {

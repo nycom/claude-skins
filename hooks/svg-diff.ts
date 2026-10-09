@@ -1,10 +1,11 @@
 import type { Palette } from './skin'
-import { escape, fitText, MONO, pill, riseDelay, strokeIcon, svgCard } from './svg-kit'
+import { CONTROL_SLOT, escape, fitText, HEADER_MID, MONO, pill, riseDelay, strokeIcon, svgCard } from './svg-kit'
 
 // An edit as a card: the file, how many lines it added and removed, and the changed
-// lines with their numbers, green and red, rising in one after another.
+// lines with their numbers, green and red, rising in one after another. The card shows
+// the first lines, each cut to the card; Copy and the alt text carry the whole patch.
 
-const HEADER_H = 44
+const HEADER_H = 56
 const LINE_H = 22
 const GAP_H = 20
 const CODE = 12.5
@@ -67,7 +68,21 @@ export function hunksOf(output: unknown): DiffInput | null {
   return null
 }
 
-export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, width: number): { source: string; height: number; alt: string } {
+// The patch as unified-diff text, for the clipboard and for a reader that cannot see the card.
+export function patchText(input: DiffInput): string {
+  const hunks = input.hunks.map(hunk => {
+    const lines = hunk.lines.filter(line => !line.startsWith('\\'))
+    const oldCount = lines.filter(line => !line.startsWith('+')).length
+    const newCount = lines.filter(line => !line.startsWith('-')).length
+
+    return [`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`, ...hunk.lines].join('\n')
+  })
+
+  return [`--- ${input.isNewFile ? '/dev/null' : `a/${input.path}`}`, `+++ b/${input.path}`, ...hunks].join('\n')
+}
+
+// `hasControl` leaves the header's right corner free for a Copy button laid over it.
+export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, width: number, hasControl = false): { source: string; width: number; height: number; alt: string } {
   const all = diffLines(input.hunks)
   const shown = all.slice(0, MAX_LINES)
   const hidden = all.length - shown.length
@@ -90,7 +105,7 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
 
     const tint = line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : undefined
     const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ''
-    const band = tint === undefined ? '' : `<rect y="${top}" width="${width}" height="${LINE_H}" fill="${tint}" fill-opacity=".1"/><rect y="${top}" width="2" height="${LINE_H}" fill="${tint}"/>`
+    const band = tint === undefined ? '' : `<rect y="${top}" width="${width}" height="${LINE_H}" fill="${tint}" fill-opacity=".1"/><rect y="${top}" width="1" height="${LINE_H}" fill="${tint}"/>`
     const number = (value: number | undefined, x: number) =>
       value === undefined ? '' : `<text x="${x}" y="${top + 15}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted}">${value}</text>`
 
@@ -99,11 +114,12 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
 
   const footer = hidden > 0 ? `<text x="${codeX}" y="${y + 18}" font-size="11.5" style="fill:${palette.muted}">${hidden} more line${hidden === 1 ? '' : 's'}</text>` : ''
   const height = y + (hidden > 0 ? 30 : 8)
-  const tag = input.isNewFile ? pill(width - 16, 12, 'new file', palette.user, palette) : ''
-  const counts = `<text x="${width - (input.isNewFile ? 100 : 16)}" y="27" text-anchor="end" font-family="${MONO}" font-size="12.5"><tspan style="fill:${palette.ok}">+${added}</tspan><tspan style="fill:${palette.muted}">  </tspan><tspan style="fill:${palette.err}">−${removed}</tspan></text>`
+  const right = width - 16 - (hasControl ? CONTROL_SLOT : 0)
+  const tag = input.isNewFile ? pill(right, HEADER_MID - 10, 'new file', palette.user, palette) : ''
+  const counts = `<text x="${right - (input.isNewFile ? 84 : 0)}" y="${HEADER_MID + 4}" text-anchor="end" font-family="${MONO}" font-size="12.5"><tspan style="fill:${palette.ok}">+${added}</tspan><tspan style="fill:${palette.muted}">  </tspan><tspan style="fill:${palette.err}">−${removed}</tspan></text>`
   const header = [
-    strokeIcon(input.isNewFile ? NEW_FILE : PENCIL, 16, 13, 18, palette.fg),
-    `<text x="44" y="27" font-family="${MONO}" font-size="13" style="fill:${palette.fg}">${escape(fitText(shownPath, width - 220, true, 13))}</text>`,
+    strokeIcon(input.isNewFile ? NEW_FILE : PENCIL, 16, HEADER_MID - 9, 18, palette.fg),
+    `<text x="44" y="${HEADER_MID + 4}" font-family="${MONO}" font-size="13" style="fill:${palette.fg}">${escape(fitText(shownPath, right - 220, true, 13))}</text>`,
     counts,
     tag,
     `<line x1="0" y1="${HEADER_H - 0.5}" x2="${width}" y2="${HEADER_H - 0.5}" stroke="${palette.muted}" stroke-opacity=".3"/>`,
@@ -111,7 +127,8 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
 
   return {
     source: svgCard(width, height, palette, '', header + rows.join('') + footer),
+    width,
     height,
-    alt: `${shownPath}: +${added} −${removed}`,
+    alt: `${shownPath}: +${added} −${removed}\n${patchText(input)}`,
   }
 }

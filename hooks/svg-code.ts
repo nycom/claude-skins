@@ -89,7 +89,7 @@ export function codeSvg(code: string, lang: string, palette: Palette, width: num
       .map(token => `<tspan style="fill:${color[token.role]}${token.role === 'keyword' ? ';font-weight:600' : ''}${token.role === 'comment' ? ';font-style:italic' : ''}">${escape(token.text)}</tspan>`)
       .join('')
 
-    return `<g class="rise" ${riseDelay(i, 12, 60)}><text x="${gutter - 12}" y="${top + 14}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted};fill-opacity:.7">${i + 1}</text><text x="${gutter}" y="${top + 14}" font-family="${MONO}" font-size="${CODE}" xml:space="preserve">${spans}</text></g>`
+    return `<g class="rise" ${riseDelay(i, 12, 60)}><text x="${gutter - 12}" y="${top + 14}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted}">${i + 1}</text><text x="${gutter}" y="${top + 14}" font-family="${MONO}" font-size="${CODE}" xml:space="preserve">${spans}</text></g>`
   })
 
   const hidden = all.length - lines.length

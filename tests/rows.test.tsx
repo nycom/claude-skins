@@ -67,7 +67,7 @@ const runSkin = ($: Engine, args: string) =>
 // The engine's own answers, so a hook can mount without a session. A test answering
 // the environment or the store itself leaves them out.
 function stubEngine(on: On, own: { env?: boolean; store?: boolean } = {}) {
-  mock.clock(on, { now: 10_000 })
+  const clock = mock.clock(on, { now: 10_000 })
   on('session.cwd', () => ({ value: '/work' }))
   if (!own.env) {
     on('env.get', () => ({ value: undefined }))
@@ -81,6 +81,8 @@ function stubEngine(on: On, own: { env?: boolean; store?: boolean } = {}) {
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [{ kind: 'five_hour', percentUsed: 18 }] } }))
   // The dialog must hold Claude Code's own drawing, which a real engine hands back by reference.
   on('ui.render', ($, e) => (e.component === 'AskUserQuestion' ? { type: 'engine', ref: 0 } : STOCK))
+
+  return clock
 }
 
 const toolUse = (props: ReturnType<typeof call>, surface: (typeof SURFACES)[number] = 'terminal') =>
@@ -104,6 +106,13 @@ test('a Bash call is a node on the terminal\u2019s rail and an icon row on the d
   const running = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'tu3', isRunning: true }), 'desktop'))
   const spinning = (await running.find({ type: 'Svg' })) as { props: { source: string } } | undefined
   expect(spinning?.props.source).toContain('class="spin"')
+  await running.unmount()
+
+  // A failed call says so by a mark on the icon and in its alt, not by colour alone.
+  const failed = await $.ui.mount(toolUse(call('Bash', { command: 'false' }, { tool_use_id: 'tu4', isErrored: true }), 'desktop'))
+  const crossed = (await failed.find({ type: 'Svg' })) as { props: { source: string; alt: string } } | undefined
+  expect(crossed?.props.source).toContain('M16.5 16.5l5 5')
+  expect(crossed?.props.alt).toBe('Run, failed')
 })
 
 test('an edit shows its added and removed lines', async ($, on) => {
@@ -427,8 +436,8 @@ test('the band offers Compact, nudges at 70% context, and compacts on a press', 
 
   const band = await $.ui.mount(BAND('desktop', false))
   expect(await band.find({ type: 'Text', text: 'Context is 85% full' })).toBeDefined()
-  // A digit hotkey reaches it from an empty prompt where the terminal reports no clicks.
-  expect(((await band.find({ key: 'compact' })) as { props: { hotkey?: string } } | undefined)?.props.hotkey).toBe('0')
+  // No hotkey on the desktop: a keystroke in the prompt must never start a compaction.
+  expect(((await band.find({ key: 'compact' })) as { props: { hotkey?: string } } | undefined)?.props.hotkey).toBeUndefined()
   await band.press({ key: 'compact' })
   // It starts on a timer, outside the press, so the press ending cannot cancel it.
   expect(compacted).toBe(0)
@@ -442,6 +451,11 @@ test('the band offers Compact, nudges at 70% context, and compacts on a press', 
 
   const busy = await $.ui.mount(BAND('terminal', true))
   expect(await busy.find({ key: 'compact' })).toBeUndefined()
+  await busy.unmount()
+
+  // The terminal's is a letter, which presses only while the band holds the focus.
+  const idle = await $.ui.mount(BAND('terminal', false))
+  expect(((await idle.find({ key: 'compact' })) as { props: { hotkey?: string } } | undefined)?.props.hotkey).toBe('c')
 })
 
 test('cards draw no background of their own', async ($, on) => {
@@ -584,4 +598,74 @@ test('/skin pin keeps a look to this folder, /skin unpin returns to the default'
 
   expect(store.folders).toEqual({})
   expect((store.prefs as { skin: string }).skin).toBe('dracula')
+})
+
+test('an auto theme notices the system turning dark mid-session, asking it at most once a minute', async ($, on) => {
+  let asked = 0
+  let isDark = false
+  const clock = stubEngine(on)
+  on('config.list', () => ({ value: THEME_AUTO as never }))
+  on('process.run', () => {
+    asked += 1
+    return { value: (isDark ? { exitCode: 0, stdout: 'Dark\n', stderr: '' } : { exitCode: 1, stdout: '', stderr: 'The domain/default pair does not exist' }) as never }
+  })
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const bashColor = async (id: string) => {
+    const row = await $.ui.mount({ ...toolUse(call('Bash', { command: 'ls' })), requestId: id })
+    const color = spanColor(await row.find({ type: 'Text', text: /Bash/ }), 'Bash')
+    await row.unmount()
+    return color
+  }
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  expect(await bashColor('t1')).toBe('#111111')
+
+  isDark = true
+  await clock.advance(1000)
+  expect(await bashColor('t2')).toBe('#111111')
+  expect(asked).toBe(1)
+
+  await clock.advance(60_000)
+  expect(await bashColor('t3')).toBe('#ededed')
+  expect(asked).toBe(2)
+})
+
+test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards still, whatever the system says', async ($, on) => {
+  let reduces = true
+  stubEngine(on)
+  on('config.list', () => ({ value: [{ key: 'reduceMotion', label: 'Reduce motion', kind: 'boolean', value: reduces, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  // The rule outside any media query: the one inside it follows the system, not the setting.
+  const holdsStill = (source: string | undefined) =>
+    (source ?? '').split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
+
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+  const icon = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'rm1', isRunning: true }), 'desktop'))
+  expect(holdsStill(((await icon.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
+  await icon.unmount()
+
+  const card = await $.ui.mount({
+    ...SITE,
+    surface: 'desktop',
+    component: 'ToolResult',
+    requestId: 'rm2',
+    props: { tool_use_id: 'rm2', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false },
+  })
+  expect(holdsStill(((await card.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
+  await card.unmount()
+
+  const band = await $.ui.mount(BAND('desktop', false))
+  expect(holdsStill(((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(true)
+  await band.unmount()
+
+  // Turned off again, only the system's preference holds them still.
+  reduces = false
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const moving = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'rm3', isRunning: true }), 'desktop'))
+  expect(holdsStill(((await moving.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(false)
 })

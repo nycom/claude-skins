@@ -48,22 +48,22 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 
 | Site | Desktop app | Terminal |
 |---|---|---|
-| Tool calls | A line icon per kind, a spinning ring while it runs, lines changed and time taken | A node on the turn's rail with the same facts |
-| Edits | A diff card: file, `+N −M`, numbered changed lines in green and red | Claude Code's own diff |
+| Tool calls | A line icon per kind, a spinning ring while it runs, a cross when it failed and a dotted ring when interrupted, lines changed and time taken | A node on the turn's rail with the same facts |
+| Edits | A diff card: file, `+N −M`, numbered changed lines in green and red, and a Copy button for the whole patch | Claude Code's own diff |
 | Shell commands | A terminal card: status pill, output with stderr apart, long output folded, and a Copy button for the output | Claude Code's own output |
 | Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
 | Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | Rings for context and each plan limit, a Compact button, and a nudge to compact from 70% context | Block meters and the same button |
+| Above the prompt | Rings for context and each plan limit, a Compact button, and a nudge to compact from 70% context | Block meters and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
 
-Every card rises in row by row and respects reduced motion. A skin only changes what is drawn: the stored
+Every card rises in row by row and respects reduced motion, as do the icons; Claude Code's Reduce motion setting holds every card and icon still and turns the terminal shimmer off. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
 Claude Code's own drawing. The default skin is **noir**, black and white. Cards have no background of
 their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette. With the `auto` theme it
-follows your terminal's background (`COLORFGBG`) or, failing that, the system's light or dark mode.
+follows your terminal's background (`COLORFGBG`) or, failing that, the system's light or dark mode, checked again every minute.
 Set `SKINS_THEME=light` or `SKINS_THEME=dark` to choose yourself, for example when you launch with
 `claude --settings '{"theme":"dark"}'`, which skins cannot see.
 
@@ -84,8 +84,8 @@ Your choices are remembered across sessions.
 ## What it can reach
 
 It draws and remembers. It reads the session's directory, your context and plan usage, Claude
-Code's theme setting and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
-compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance (`defaults read -g AppleInterfaceStyle`
+Code's theme and Reduce motion settings and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
+compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
 on macOS, `gsettings get org.gnome.desktop.interface color-scheme` on GNOME); it starts no other
 process, touches no file and makes no network call.
 Check it yourself:
