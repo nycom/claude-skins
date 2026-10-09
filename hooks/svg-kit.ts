@@ -29,19 +29,35 @@ export function measure(text: string, isMono: boolean, size: number): number {
   }, 0)
 }
 
+// Keeps the characters that fit with an ellipsis after them, at least one; one pass, so a
+// long line costs no more than its length.
 export function fitText(text: string, width: number, isMono: boolean, size: number): string {
   if (measure(text, isMono, size) <= width) {
     return text
   }
 
-  const chars = [...text]
+  const room = width - measure('…', isMono, size)
+  let used = 0
+  let kept = ''
 
-  while (chars.length > 1 && measure(`${chars.join('')}…`, isMono, size) > width) {
-    chars.pop()
+  for (const char of text) {
+    used += measure(char, isMono, size)
+
+    if (used > room && kept !== '') {
+      break
+    }
+
+    kept += char
   }
 
-  return `${chars.join('')}…`
+  return `${kept}…`
 }
+
+// Alt text for a card that holds a whole file or block: a reader gets the first MAX_ALT
+// characters, the clipboard the rest.
+export const MAX_ALT = 4000
+
+export const capAlt = (text: string): string => (text.length > MAX_ALT ? `${text.slice(0, MAX_ALT)}…` : text)
 
 // The room a reply gives a card, from the width the desktop reports in cells of its code
 // font, kept to a range a card reads well at. The reported width runs wider than the

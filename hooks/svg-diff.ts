@@ -1,5 +1,5 @@
 import type { Palette } from './skin'
-import { CONTROL_SLOT, escape, fitText, HEADER_MID, MONO, pill, riseDelay, strokeIcon, svgCard } from './svg-kit'
+import { capAlt, CONTROL_SLOT, escape, fitText, HEADER_MID, MONO, pill, riseDelay, strokeIcon, svgCard } from './svg-kit'
 
 // An edit as a card: the file, how many lines it added and removed, and the changed
 // lines with their numbers, green and red, rising in one after another. The card shows
@@ -139,6 +139,6 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
     source: svgCard(width, height, palette, '', header + rows.join('') + footer),
     width,
     height,
-    alt: `${shownPath}: +${added} −${removed}\n${fitText(patchText(input, shownPath), 4000, true, CODE)}`,
+    alt: `${shownPath}: +${added} −${removed}\n${capAlt(patchText(input, shownPath))}`,
   }
 }

@@ -1,5 +1,5 @@
 import type { Palette } from './skin'
-import { CONTROL_SLOT, escape, HEADER_MID, fitText, MONO, riseDelay, svgCard, tint } from './svg-kit'
+import { capAlt, CONTROL_SLOT, escape, HEADER_MID, MONO, riseDelay, svgCard, tint } from './svg-kit'
 
 // A fenced code block as a card: the language and line count in a header, line numbers
 // in a gutter, and light highlighting of comments, strings, numbers and keywords.
@@ -106,6 +106,6 @@ export function codeSvg(code: string, lang: string, palette: Palette, width: num
     source: svgCard(width, height, palette, '', header + rows.join('') + footer),
     width,
     height,
-    alt: `${lang || 'code'}:\n${fitText(code, 4000, true, CODE)}`,
+    alt: `${lang || 'code'}:\n${capAlt(code)}`,
   }
 }

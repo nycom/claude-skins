@@ -6,6 +6,7 @@ import { runDesign } from '../hooks/designer'
 import { clipLines, diffstat, formatDuration, formatMs, pick, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
+import { MAX_ALT } from '../hooks/svg-kit'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
@@ -219,6 +220,28 @@ test('a copied patch names the file relative to the session, or by its absolute 
 
   expect(patchText(diff, 'src/a.ts')).toBe('--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-a\n+b')
   expect(patchText({ ...diff, path: '/tmp/a.ts' }, '/tmp/a.ts').split('\n').slice(0, 2)).toEqual(['--- /tmp/a.ts', '+++ /tmp/a.ts'])
+})
+
+test('a changed line draws its numbers and sign in the text colour, readable on its tint', async () => {
+  const { fg, muted } = tokyoNight.palette
+  const card = diffSvg({ path: 'a.ts', hunks: [{ oldStart: 7, newStart: 9, lines: ['-a', '+b'] }], isNewFile: false }, 'a.ts', tokyoNight.palette, 600)
+
+  for (const text of ['7', '9', '−', '+']) {
+    expect(card.source).toContain(`style="fill:${fg}">${text}</text>`)
+    expect(card.source).not.toContain(`style="fill:${muted}">${text}</text>`)
+  }
+})
+
+test('a huge new file still draws at once, its alt capped in characters', async () => {
+  const lines = Array.from({ length: 2000 }, (_, i) => `+const line${i} = '${'x'.repeat(60)}'`)
+  const started = Date.now()
+  const card = diffSvg({ path: 'big.ts', hunks: [{ oldStart: 0, newStart: 1, lines }], isNewFile: true }, 'big.ts', tokyoNight.palette, 800)
+  const code = codeSvg(lines.join('\n').repeat(4), 'ts', tokyoNight.palette, 800)
+
+  expect(Date.now() - started).toBeLessThan(200)
+  expect(card.alt.length).toBeLessThanOrEqual('big.ts: +2000 −0\n'.length + MAX_ALT + 1)
+  expect(code.alt.length).toBeLessThanOrEqual('ts:\n'.length + MAX_ALT + 1)
+  expect(card.alt.length).toBeGreaterThan(MAX_ALT)
 })
 
 test('a patch numbers its lines on each side and marks the gap between hunks', async () => {
