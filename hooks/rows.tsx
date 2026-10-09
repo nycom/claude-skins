@@ -14,7 +14,7 @@ import { cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { type From, usageLine, usageSvg } from './svg-usage'
+import { usageLine, usageSvg } from './svg-usage'
 import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
@@ -501,13 +501,13 @@ export const COMPACT_NUDGE = 70
 // (`c: Compact`); the desktop's button is pressed with the pointer.
 export const COMPACT_HOTKEY = 'c'
 
-function meterView(look: Look, meters: readonly Meter[], from?: From, isPulsing = false) {
+function meterView(look: Look, meters: readonly Meter[], starts: readonly number[] = [], isPulsing = false) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
   if (look.svg !== undefined) {
     const Svg = look.svg
-    const built = usageSvg(meters, palette, from, isPulsing)
+    const built = usageSvg(meters, palette, starts, isPulsing)
 
     return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
   }
@@ -526,7 +526,7 @@ function meterView(look: Look, meters: readonly Meter[], from?: From, isPulsing 
 
 // The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
 // the main action, with a word on why, once the context is full enough to be worth it.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, from?: From) {
+export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, starts: readonly number[] = []) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
   const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
@@ -536,7 +536,7 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
   return (
     // The right edge stays clear: the band draws its own collapse mark ([-]) there.
     <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      {meterView(look, meters, from, isOffered && isNudge)}
+      {meterView(look, meters, starts, isOffered && isNudge)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
       {isOffered ? (

@@ -15,9 +15,6 @@ const ITEM_W = 132
 
 export type Meter = { label: string; percent: number }
 
-// Where each ring's fill starts growing from, in percent, one per meter.
-export type From = (meters: readonly Meter[]) => readonly number[]
-
 // How long after a new reading the rings grow; past it they are drawn settled.
 export const SETTLE_MS = 1200
 
@@ -81,13 +78,13 @@ export const TRACK_OPACITY = 0.2
 // A soft halo that breathes out from the context ring while the band nudges to compact.
 const PULSE = '@keyframes pulse{50%{stroke-width:6px;stroke-opacity:.35}}'
 
-export function usageSvg(meters: readonly Meter[], palette: Palette, from: From = meters => meters.map(() => 0), isPulsing = false): { source: string; width: number; height: number; alt: string } {
+// `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
+export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], isPulsing = false): { source: string; width: number; height: number; alt: string } {
   const width = meters.length * ITEM_W
   const height = BAND_H
   const circumference = 2 * Math.PI * RING_R
 
   const ramps: string[] = []
-  const starts = from(meters)
   const items = meters
     .map((meter, i) => {
       const x = i * ITEM_W + RING_R + 4

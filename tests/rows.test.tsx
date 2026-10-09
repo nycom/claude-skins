@@ -753,6 +753,30 @@ test('a table that grows while its reply streams: only the rows new since the la
   expect(again).not.toContain('fresh')
 })
 
+test('a reply whose table gives its place to text on a redraw still draws', async ($, on) => {
+  stubEngine(on)
+  const reply = (text: string) => ({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'swap-tb', props: { text } as never }) as const
+  const table = '| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |'
+
+  await (await $.ui.mount(reply(table))).unmount()
+  const swapped = await $.ui.mount(reply(`Intro\n\n${table}`))
+  expect(await swapped.find({ type: 'Svg' })).toBeDefined()
+  await swapped.unmount()
+})
+
+test('the terminal drawing a reply first does not hold the desktop’s first draw still', async ($, on) => {
+  stubEngine(on)
+  const reply = (surface: (typeof SURFACES)[number]) =>
+    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'both-tb', props: { text: '| A | B |\n| --- | --- |\n| 1 | 2 |' } as never }) as const
+
+  await (await $.ui.mount(reply('terminal'))).unmount()
+  const desktop = await $.ui.mount(reply('desktop'))
+  const source = ((await desktop.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+  expect(source).toContain('<svg')
+  expect(source).not.toContain('*{animation:none!important}</style>')
+  await desktop.unmount()
+})
+
 test('when the context ring moves, a weekly ring that did not move stays full instead of replaying', async ($, on) => {
   mock.clock(on)
   let percent = 40
@@ -813,6 +837,26 @@ test('the context ring grows from its last reading, and a redraw at the same rea
   const centres = [...grown.matchAll(/<circle[^>]* cx="([\d.]+)" cy="([\d.]+)"/g)].map(m => `${m[1]},${m[2]}`)
   expect(centres.length).toBe(2)
   expect(centres[1]).toBe(centres[0])
+})
+
+test('a band left on screen settles by itself once its rings have grown', async ($, on) => {
+  const clock = mock.clock(on)
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 40 }, rateLimits: [] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const band = await $.ui.mount(BAND('desktop', false))
+  const source = async () => ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+
+  expect(await source()).toContain('@keyframes fill')
+  await clock.advance(1200)
+  expect(await source()).toContain('<svg')
+  expect(await source()).not.toContain('@keyframes fill')
+  await band.unmount()
 })
 
 test('from 70% with Compact offered the context ring pulses, unless motion is reduced', async ($, on) => {
