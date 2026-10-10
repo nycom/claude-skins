@@ -2,26 +2,31 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, TurnStats } from '../types'
 import { formatDuration, formatMs } from './format'
-import { columnWidths, cutCell, widthOf } from './markdown'
+import { columnWidths, cutCell, plainTable, widthOf } from './markdown'
 import type { Segment, Table } from './markdown'
+import { ICONS } from './skin'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
+import type { LoopProps } from './anim'
 import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
-import { PX_PER_COLUMN, cardWidth } from './svg-kit'
-import { tableSvg } from './svg-table'
+import { PX_PER_COLUMN, cardWidth, isLooping } from './svg-kit'
+import { gridCost, JUSTIFY, MAX_GRID_COLUMNS, MAX_GRID_NODES, tableCard } from './table-card'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { partCells, usageLine, usageSvg } from './svg-usage'
+import { BAND_H, COMPACT_NUDGE, COMPACT_SHOW, partCells, usageLine, usageSvg } from './svg-usage'
 import type { Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
-export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button'>
+export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button' | 'Link'>
 
 // The vector element, on the surfaces that have one (the desktop app).
 export type SvgElement = ElementTable<'desktop'>['Svg']
+
+// A region one of the mod's surface modules draws, on the desktop.
+export type ClientElement = ElementTable<'desktop'>['Client']
 
 export type Look = {
   ui: Ui
@@ -31,6 +36,8 @@ export type Look = {
   surface: RenderSurface
   // The vector element where the surface draws one: icons replace glyphs there.
   svg?: SvgElement
+  // Where the surface keeps a module's region across redraws (the desktop): loops draw there.
+  client?: ClientElement
   // Puts text on the clipboard of the surface drawing; absent where nothing can copy.
   copy?: (text: string) => void
 }
@@ -158,22 +165,49 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
   )
 }
 
+// The text cells a loop's Client takes: a fixed region never resizes, so the desktop never
+// draws it again for that, which would start its loop over.
+// ponytail: a guess at the desktop's cell (about 7px a column, 20px a row), taken low so a
+// region rounds up to more cells than its image needs: loose, never clipped. table-card takes
+// the same cell high (8px) for the inverse sum, pixels a padding takes, so a column never comes
+// up short; PX_PER_COLUMN (6.4) is no cell but the reported width's share of the reply column.
+// Measure a cell live if an icon sits loose.
+const CELL_W = 7
+const CELL_H = 20
+const cells = (px: number, per: number): number => Math.ceil((px / per) * 10) / 10
+
+// An image that may loop. `key` is the Client it moves in; with none it is drawn bare. The desktop builds an Svg again on every redraw, which starts its
+// loop over, so there a loop is drawn by a Client (anim.tsx), which the desktop keeps across
+// redraws while its props stay the same.
+function loopImage(look: Look, Svg: SvgElement, source: string, image: { alt: string; width: number; height: number }, key?: string) {
+  const isLoop = isLooping(source) && key !== undefined
+  const drawn = { source, ...image }
+  const Client = look.client
+
+  return isLoop && Client !== undefined ? (
+    <Client key={key} module="./anim.tsx" props={drawn satisfies LoopProps} width={cells(image.width, CELL_W)} height={cells(image.height, CELL_H)} />
+  ) : (
+    <Svg {...drawn} />
+  )
+}
+
 // On a surface with vector icons, the icon leads the row in place of the status glyph.
 // Its shape names the kind; a failed or interrupted call adds a mark, and the alt says it.
-function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>) {
+function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>, loop?: string) {
   const { Box } = look.ui
   const { color, word, mark } = status(look, calls)
   const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark)
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={source} alt={`${KIND_LABEL[kind]}, ${word}`} width={16} height={16} />
+      {loopImage(look, Svg, source, { alt: `${KIND_LABEL[kind]}, ${word}`, width: 16, height: 16 }, loop)}
       {line}
     </Box>
   )
 }
 
-export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta) {
+// `loop` is the Client key a running icon moves under.
+export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, loop?: string) {
   const { Text } = look.ui
   const { palette } = look.skin
 
@@ -187,7 +221,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
       </Text>
     )
 
-    return iconRow(look, look.svg, kind, [call], withMeta(look, line, meta))
+    return iconRow(look, look.svg, kind, [call], withMeta(look, line, meta), loop)
   }
 
   const main = (
@@ -202,7 +236,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
 }
 
 // A run of reads and searches on one node: `●─ Read 3 · Search 2`.
-export function groupRow(look: Look, calls: readonly Call[]) {
+export function groupRow(look: Look, calls: readonly Call[], loop?: string) {
   const { Text } = look.ui
   const { palette } = look.skin
   const counts = new Map<Kind, number>()
@@ -221,7 +255,7 @@ export function groupRow(look: Look, calls: readonly Call[]) {
   if (look.svg !== undefined) {
     const lead = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'other'
 
-    return iconRow(look, look.svg, lead, calls, <Text wrap="truncate-end">{parts}</Text>)
+    return iconRow(look, look.svg, lead, calls, <Text wrap="truncate-end">{parts}</Text>, loop)
   }
 
   return stack(
@@ -235,12 +269,12 @@ export function groupRow(look: Look, calls: readonly Call[]) {
 
 // The desktop's spinner row: an animated icon for what the turn is doing, beside the
 // step the desktop names (`Creating notes.md`).
-export function desktopSpinnerRow(look: Look, Svg: SvgElement, mode: SpinnerMode, text: string) {
+export function desktopSpinnerRow(look: Look, Svg: SvgElement, mode: SpinnerMode, text: string, loop?: string) {
   const { Box, Text } = look.ui
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={spinnerIcon(mode, look.skin.palette.user)} alt={mode} width={20} height={20} />
+      {loopImage(look, Svg, spinnerIcon(mode, look.skin.palette.user), { alt: mode, width: 20, height: 20 }, loop)}
       <Text color={look.skin.palette.muted}>{text}</Text>
     </Box>
   )
@@ -261,8 +295,6 @@ export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text
     </Box>
   )
 }
-
-const JUSTIFY = { left: 'flex-start', right: 'flex-end', center: 'center' } as const
 
 // The share of the reported width a table may take at its natural size. Past it, the
 // table spans its container and splits it between columns in proportion: the desktop
@@ -315,47 +347,52 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
   )
 }
 
-// A card drawn as an image, with its Copy button laid over the top-right corner the card
-// left free. The image cannot be pressed, so the button is a real one on top of it; the
-// box hugs the image so the corner is the card's, not the column's.
-function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string, label: string) {
-  const { Box, Button } = look.ui
-  const copy = look.copy
+// A card's Copy button laid over its top-right corner, level with its header, in the
+// slot the card leaves free there; nothing where nothing can copy. The image cannot be
+// pressed, so the button is a real one on top of it. The slot fits one glyph, so the button
+// keeps the glyph whatever the icon set: only the desktop draws cards.
+function copyOverlay(look: Look, key: string, text: string) {
+  const { Box } = look.ui
+  const button = copyButton({ ...look, icons: ICONS.unicode }, key, text)
 
-  return (
-    <Box marginY={1} alignSelf="flex-start">
-      <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
-      {copy === undefined ? (
-        ''
-      ) : (
-        <Box position="absolute" top={1} right={3}>
-          <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
-        </Box>
-      )}
+  return button === undefined ? (
+    ''
+  ) : (
+    <Box position="absolute" top={1} right={3}>
+      {button}
     </Box>
   )
 }
 
-function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string, fresh?: number) {
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined, fresh)
+// A card drawn as an image with its Copy button over it; the box hugs the image so the
+// corner is the card's, not the column's.
+function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; width: number; height: number }, key: string, text: string) {
+  const { Box } = look.ui
 
-  return cardWithCopy(look, Svg, card, key, tableMarkdown(table), 'Copy table')
+  return (
+    <Box marginY={1} alignSelf="flex-start">
+      <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
+      {copyOverlay(look, key, text)}
+    </Box>
+  )
 }
 
-// A table as markdown again, for the clipboard.
+// A table as markdown again, its alignment kept: for the clipboard, and for the desktop
+// where a table is too big for a grid.
+const RULE = { left: '---', right: '--:', center: ':-:' } as const
 const tableMarkdown = (table: Table): string =>
-  [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
+  [table.header, table.header.map((_, i) => RULE[table.align[i] ?? 'left']), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
 
-// A Copy button padded to sit on a border line; nothing where nothing can copy.
+// A copy button, an icon; nothing where nothing can copy.
 function copyButton(look: Look, key: string, text: string) {
   const { Button } = look.ui
   const copy = look.copy
 
-  return copy === undefined ? undefined : <Button key={key} label="Copy table" plain dimColor onPress={() => copy(text)} />
+  return copy === undefined ? undefined : <Button key={key} label={look.icons.copy} plain dimColor onPress={() => copy(text)} />
 }
 
-// A small Copy button under a card or block, flush right; nothing where nothing can copy.
-export function copyRow(look: Look, key: string, text: string, label = 'Copy code') {
+// A small copy icon button under a card or block, flush right; nothing where nothing can copy.
+export function copyRow(look: Look, key: string, text: string) {
   const { Box, Button } = look.ui
   const copy = look.copy
 
@@ -365,14 +402,16 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy cod
 
   return (
     <Box flexDirection="row" justifyContent="flex-end">
-      <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
+      <Button key={key} label={look.icons.copy} plain dimColor onPress={() => copy(text)} />
     </Box>
   )
 }
 
-// `fresh` holds, per segment, the first table row new since the reply's last draw.
-export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, fresh: readonly (number | undefined)[] = []) {
+export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement) {
   const { Box, Markdown } = look.ui
+  // The desktop refuses a whole reply past its element limit, so native grids share a
+  // budget in reply order; a table past it, or too wide to split, stays the surface's markdown.
+  let gridBudget = MAX_GRID_NODES
 
   return (
     <Box flexDirection="column">
@@ -392,11 +431,27 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
           )
         }
 
-        return Svg === undefined ? (
-          tableRows(look, segment, maxWidth, copyButton(look, `copy-${i}`, tableMarkdown(segment)))
-        ) : (
-          tableCard(look, segment, Svg, maxWidth, `copy-${i}`, fresh[i])
-        )
+        const markdown = tableMarkdown(segment)
+
+        if (Svg === undefined) {
+          return tableRows(look, plainTable(segment), maxWidth, copyButton(look, `copy-${i}`, markdown))
+        }
+
+        const cost = gridCost(segment)
+
+        if (cost > gridBudget || segment.header.length > MAX_GRID_COLUMNS) {
+          return (
+            <Box flexDirection="column">
+              <Markdown text={markdown} />
+              {copyRow(look, `copy-${i}`, markdown)}
+            </Box>
+          )
+        }
+
+        gridBudget -= cost
+
+        // The desktop card's header slot fits one glyph, so it keeps the glyph whatever the icon set.
+        return tableCard(look, segment, maxWidth, copyButton({ ...look, icons: ICONS.unicode }, `copy-${i}`, markdown))
       })}
     </Box>
   )
@@ -475,26 +530,20 @@ export function askBand(look: Look, headers: readonly string[]) {
 }
 
 export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code') {
-  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code, 'Copy code')
+  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code)
 }
 
 // The card shows the first lines; Copy gives the whole patch.
 export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPath: string, columns: number) {
-  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input, shownPath), 'Copy diff')
+  return cardWithCopy(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns), look.copy !== undefined), 'copy-diff', patchText(input, shownPath))
 }
 
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number) {
   const text = [output.stdout, output.stderr].filter(part => part.trim() !== '').join('\n')
   const withCopy = text === '' ? { ...look, copy: undefined } : look
 
-  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text, 'Copy output')
+  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined), 'copy-output', text)
 }
-
-// From this full, the band offers Compact; below it the button stays hidden.
-export const COMPACT_SHOW = 50
-
-// From this full, the band suggests compacting and makes it the main action.
-export const COMPACT_NUDGE = 70
 
 // A letter, which presses only while the band holds the focus (ctrl+x tab), never from
 // the prompt: Compact cannot be undone, so typing cannot set it off. The terminal shows it
@@ -513,7 +562,7 @@ function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: numb
 }
 
 // The meters with as many extras as fit `room` columns; with none, whatever their width.
-function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[] = [], isPulsing = false) {
+function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[], loopKey: string) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
@@ -522,10 +571,19 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 
     if (look.svg !== undefined) {
       const Svg = look.svg
-      const built = usageSvg(view.meters, palette, starts, isPulsing, view.parts)
+      const built = usageSvg(view.meters, palette, starts, view.parts)
 
+      // Each ring an image of its own, so a ring moves in a Client of its own.
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
-        return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
+        return (
+          <Box flexDirection="row" alignItems="center">
+            {built.rings.flatMap(({ ring, text }, i) => [
+              loopImage(look, Svg, ring.source, { alt: ring.alt, width: ring.width, height: BAND_H }, `${loopKey}-ring-${i}`),
+              <Svg source={text.source} alt={text.alt} width={text.width} height={BAND_H} />,
+            ])}
+            {built.bar === undefined ? '' : <Svg source={built.bar.source} alt={built.bar.alt} width={built.bar.width} height={BAND_H} />}
+          </Box>
+        )
       }
 
       continue
@@ -563,7 +621,16 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 // The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
 // the main action, with a word on why, once the context is full enough to be worth it. Extras
 // sit between the two and give way first, so the button never moves for them.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, starts: readonly number[] = [], parts: readonly Part[] = [], columns = Infinity) {
+export function usageBand(
+  look: Look,
+  meters: readonly Meter[],
+  canCompact: boolean,
+  compact: () => void,
+  starts: readonly number[] = [],
+  parts: readonly Part[] = [],
+  columns = Infinity,
+  loopKey = 'loop',
+) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
   const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
@@ -578,7 +645,7 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
   return (
     // bodyColumns already leave out the engine's collapse mark ([-]) at the right edge.
     <Box flexDirection="row" alignItems="center" columnGap={2}>
-      {meterView(look, meters, parts, columns - reserved, starts, isOffered && isNudge)}
+      {meterView(look, meters, parts, columns - reserved, starts, loopKey)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? (
         <Box flexShrink={0}>

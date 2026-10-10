@@ -2,7 +2,9 @@ import type { Kind } from './skin'
 import { still } from './svg-kit'
 
 // Vector icons and spinners for the surfaces that draw `Svg` (the desktop app). Each is a
-// whole SVG document; animation is CSS, which plays in the image the desktop draws.
+// whole SVG document; animation is CSS, which plays in the image the desktop draws. Each
+// depends on its kind, colour and state alone, never on time, so a redraw is the same image
+// and its loop runs on.
 
 // Outline paths on a 24-unit grid.
 const PATHS: Readonly<Record<Kind, string>> = {

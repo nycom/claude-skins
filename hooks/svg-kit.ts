@@ -1,3 +1,4 @@
+import { charWidth } from './markdown'
 import type { Palette } from './skin'
 
 // What every vector card shares: fonts, text measuring and fitting, escaping, and the
@@ -11,12 +12,17 @@ export const escape = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 // Width of a string in pixels, close enough to lay out a card without a renderer.
+// A wide East Asian character or emoji takes about an em in either font.
 export function measure(text: string, isMono: boolean, size: number): number {
-  if (isMono) {
-    return [...text].length * size * 0.6
-  }
-
   return [...text].reduce((sum, char) => {
+    if (charWidth(char) === 2) {
+      return sum + size
+    }
+
+    if (isMono) {
+      return sum + size * 0.6
+    }
+
     if ('iljtf.,:;|!\'` '.includes(char)) {
       return sum + size * 0.3
     }
@@ -117,14 +123,17 @@ export const still = (moving?: string): string =>
       ? `:not(${moving}){animation:none!important}${SYSTEM_HOLD}`
       : SYSTEM_HOLD
 
+// Whether a drawing loops as drawn now: an endless animation, motion not held.
+export const isLooping = (source: string): boolean => !isStill && !isRedraw && source.includes(' infinite')
+
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
   `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
 
 const RADIUS = 12
 
-// The room a card leaves in its top-right corner for a Copy button laid over it, sized
-// for the longest label, `Copy output`.
-export const CONTROL_SLOT = 124
+// The room a card leaves at the right end of its header row for the Copy button laid
+// over it: the one-glyph icon and a gap.
+export const CONTROL_SLOT = 44
 
 // Where a header's labels centre: the line the Copy button laid over a card sits on,
 // one text row down from the card's top edge.

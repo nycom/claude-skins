@@ -10,18 +10,28 @@ export type Code = { kind: 'code'; lang: string; code: string; raw: string }
 
 export type Segment = { kind: 'text'; text: string } | Table | Code
 
+// A markdown link, `[text](href)`.
+export const LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g
+
 const SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
 const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)/
 
-// Inline emphasis and code ticks read as noise in a padded cell.
-const clean = (cell: string): string =>
-  cell.replace(/\*\*|__|`/g, '').replace(/\\\|/g, '|').trim()
-
+// A cell keeps its markdown as written, an escaped pipe included, for the desktop's
+// markdown cells and the clipboard.
 export function cellsOf(line: string): string[] {
   const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '')
 
-  return inner.split(/(?<!\\)\|/).map(clean)
+  return inner.split(/(?<!\\)\|/).map(cell => cell.trim())
 }
+
+// Inline emphasis and code ticks read as noise in a padded cell of plain text.
+export const plainCell = (cell: string): string => cell.replace(/\*\*|__|`/g, '').replace(/\\\|/g, '|').trim()
+
+export const plainTable = (table: Table): Table => ({
+  ...table,
+  header: table.header.map(plainCell),
+  rows: table.rows.map(row => row.map(plainCell)),
+})
 
 const alignOf = (cell: string): Align => {
   const spec = cell.trim()
@@ -132,7 +142,7 @@ const WIDE: readonly (readonly [number, number])[] = [
   [0x20000, 0x3fffd],
 ]
 
-const charWidth = (char: string): number => {
+export const charWidth = (char: string): number => {
   const code = char.codePointAt(0) ?? 0
 
   if (/\p{Mn}|\p{Me}|\u200d|[\ufe00-\ufe0f]|\p{Emoji_Modifier}/u.test(char)) {

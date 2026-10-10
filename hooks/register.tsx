@@ -1,10 +1,10 @@
 import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-code'
 
-import type { CustomSkin, Prefs, SkinSlot, TurnStats, UsageSnap } from '../types'
+import type { CustomSkin, PanelTheme, Prefs, SkinSlot, TurnStats, UsageSnap } from '../types'
 import { DEFAULT_PREFS, parsePrefs, runSkinCommand, TOGGLES } from './command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from './custom'
-import { forTheme, resolveLight } from './light'
+import { forTheme, resolveLight, selectionOf } from './light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from './folders'
 import { DESIGN_TOOL, runDesign } from './designer'
 import type { DesignState } from './designer'
@@ -12,7 +12,7 @@ import { clipLines, diffstat, pick } from './format'
 import { splitReply } from './markdown'
 import type { Segment } from './markdown'
 import { askBand, desktopSpinnerRow, diffCard, footerRow, terminalCard, usageBand, groupRow, promptRow, replyRows, spinnerRow, toolRow } from './rows'
-import type { Look, SvgElement, Ui } from './rows'
+import type { ClientElement, Look, SvgElement, Ui } from './rows'
 import { galleryPane } from './gallery'
 import { settingsPane } from './settings'
 import { ICONS } from './skin'
@@ -55,7 +55,8 @@ const imagesAtom = atom({ plugin: 'skins', key: 'images' } as const, false)
 const usageAtom = atom({ plugin: 'skins', key: 'usage' } as const, { context: null, limits: [] } as UsageSnap)
 const compactingAtom = atom({ plugin: 'skins', key: 'compacting' } as const, false)
 const pinnedAtom = atom({ plugin: 'skins', key: 'pinned' } as const, false)
-
+const themeAtom = atom({ plugin: 'skins', key: 'theme' } as const, null as PanelTheme | null)
+const settledAtom = atom({ plugin: 'skins', key: 'settled' } as const, 0)
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 
 // Only a person's own typing becomes a prompt row: a task notification or a peer's
@@ -72,6 +73,29 @@ async function activeSkin($: EngineInterface): Promise<Active | null> {
   const skin = resolveSkin(prefs.skin, custom)
 
   return skin === undefined ? null : { prefs, skin: forTheme(skin, await read($, lightAtom)), custom }
+}
+
+// The drawn skin's colours for other mods' panels. Skins draw on the host's background,
+// so `surface` stands in for it; a quarter of the accent over it is a highlight body text
+// still reads on (at least 5:1 for every built-in skin, light or dark). Each write redraws
+// every reader, so only a change is written.
+async function publishTheme($: EngineInterface): Promise<void> {
+  const active = await activeSkin($)
+  const p = active?.skin.palette
+  const theme: PanelTheme | null =
+    p === undefined
+      ? null
+      : {
+          mode: (await read($, lightAtom)) ? 'light' : 'dark',
+          accent: p.user,
+          foreground: p.fg,
+          dim: p.muted,
+          red: p.err,
+          selection: selectionOf(p),
+          background: p.surface,
+        }
+
+  if (JSON.stringify(await read($, themeAtom)) !== JSON.stringify(theme)) await update($, themeAtom, () => theme)
 }
 
 // The system's appearance, for an `auto` theme: macOS's AppleInterfaceStyle, else GNOME's
@@ -112,6 +136,7 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
 
   // Every write redraws every card that reads it, so the minute's poll writes only a change.
   if ((await read($, lightAtom)) !== isLight) await update($, lightAtom, () => isLight)
+  await publishTheme($)
 
   return { followsSystem: needsSystem, reducesMotion: rows.find(row => row.key === 'reduceMotion')?.value === true }
 }
@@ -121,38 +146,36 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
 const drawKey = (e: { surface: RenderSurface; requestId?: string | undefined }): string | undefined =>
   e.requestId === undefined ? undefined : `${e.surface}:${e.requestId}`
 
-// Rows whose cards have been drawn once; a later draw of one holds its card still (see drawOnce).
-// ponytail: grows by one key per card row for the session; a reload clears it.
-const drawn = new Set<string>()
-const redraw = (key: string | undefined): boolean => {
-  if (key === undefined) return false
-  const seen = drawn.has(key)
-  drawn.add(key)
+// Each reply's segments as last drawn: a redraw holds its cards still.
+// ponytail: keeps every reply with a card for the session; a reload clears it.
+const shown = new Map<string, readonly Segment[]>()
+// The cards each surface has drawn, a reply's by what they hold, a tool's by its call: one
+// mounted again under a new request, as one scrolled back into view may be, draws still.
+// ponytail: one entry per card shown for the session; a reload clears it.
+const seenCards = new Set<string>()
+// A tool's card is known by its call and kind, whatever request draws it; true once drawn.
+const sawToolCard = (e: { surface: RenderSurface; props: { tool_use_id: string } }, kind: 'diff' | 'terminal'): boolean => {
+  const card = `${e.surface}:${kind}:${e.props.tool_use_id}`
+  const seen = seenCards.has(card)
+  seenCards.add(card)
   return seen
 }
-
-// Each reply's segments as last drawn. A redraw holds the reply still, but a table that
-// only gained rows, as one does while its reply streams, lets the new rows rise in.
-// ponytail: keeps every reply with a table for the session; a reload clears it.
-const shown = new Map<string, readonly Segment[]>()
-const freshRows = (key: string | undefined, segments: readonly Segment[]): (number | undefined)[] | undefined => {
-  if (key === undefined) return undefined
+// A table is no image, so only a reply's code cards are remembered.
+const cardsOf = (surface: RenderSurface, segments: readonly Segment[]): string[] =>
+  segments.filter(segment => segment.kind === 'code').map(segment => `${surface}:${JSON.stringify(segment)}`)
+// True when the reply's cards were drawn before: a redraw of the same reply, or the same
+// cards under a new request.
+const sawReplyCards = (e: { surface: RenderSurface; requestId?: string | undefined }, segments: readonly Segment[]): boolean => {
+  const key = drawKey(e)
+  if (key === undefined) return false
   const last = shown.get(key)
   shown.set(key, segments)
-  if (last === undefined) return undefined
-
-  // A table is matched to the one at its own place among the reply's tables, so text or code
-  // arriving ahead of it, which moves it to a later segment, does not make it new.
-  const priorTables = last.filter(segment => segment.kind === 'table')
-  let nth = 0
-  return segments.map(segment => {
-    if (segment.kind !== 'table') return undefined
-    const prior = priorTables[nth++]
-    const before = prior?.kind === 'table' ? prior.rows : []
-    // The last row may have been drawn half-written and finished since, so it may differ.
-    const kept = before.slice(0, -1).every((row, r) => row.join('\n') === segment.rows[r]?.join('\n'))
-    return segment.rows.length > before.length && kept ? before.length : undefined
-  })
+  // A streaming reply's earlier draws are not cards anyone scrolls back to.
+  for (const card of cardsOf(e.surface, last ?? [])) seenCards.delete(card)
+  const cards = cardsOf(e.surface, segments)
+  const isSeen = cards.every(card => seenCards.has(card))
+  for (const card of cards) seenCards.add(card)
+  return last !== undefined || isSeen
 }
 
 // The band's rings grow from their last reading (see rampFrom); once they have grown, one
@@ -167,6 +190,22 @@ const stopRelabel = (): void => {
   relabel = undefined
 }
 
+// The engine keeps a reply's drawing and shows it again when the reply's row mounts again,
+// as on a scroll back into view, which plays its animation again. So once its rows have
+// risen, the reply is drawn once more, still, and that is the drawing kept.
+const replySettles = new Map<string, { cancel(): void }>()
+function settleReply($: EngineInterface, e: { surface: RenderSurface; requestId: string }): void {
+  const key = `${e.surface}:${e.requestId}`
+  replySettles.get(key)?.cancel()
+  replySettles.set(
+    key,
+    $.clock.after(SETTLE_MS, () => {
+      replySettles.delete(key)
+      return update($, memberOf(settledAtom, e), n => n + 1)
+    }),
+  )
+}
+
 // What the settings said when last read.
 type ConfigMemo = Awaited<ReturnType<typeof refreshTheme>>
 
@@ -176,9 +215,9 @@ async function readConfig($: EngineInterface, memo: ConfigMemo): Promise<void> {
 }
 
 // Every surface's element table names Svg, but the terminal draws it as nothing, so
-// vector icons are for the other surfaces only.
+// vector icons are for the other surfaces only; loops move in a Client on the desktop's.
 const lookOf = (
-  ui: Ui & { Svg?: SvgElement },
+  ui: Ui & { Svg?: SvgElement; Client?: ClientElement },
   active: Active,
   surface: RenderSurface,
   copy?: (text: string) => void,
@@ -189,6 +228,7 @@ const lookOf = (
   prefs: active.prefs,
   surface,
   ...(surface !== 'terminal' && ui.Svg !== undefined ? { svg: ui.Svg } : {}),
+  ...(surface === 'desktop' && ui.Client !== undefined ? { client: ui.Client } : {}),
   ...(copy === undefined ? {} : { copy }),
 })
 
@@ -248,6 +288,7 @@ async function runFolderCommand($: EngineInterface, word: string): Promise<strin
       await $.store.set('folders', withoutFolder(folders, folder))
       await update($, pinnedAtom, () => false)
       await update($, prefsAtom, () => fallback)
+      await publishTheme($)
 
       return `this folder follows the default: ${fallback.skin}`
     }
@@ -280,6 +321,7 @@ async function refreshUsage($: EngineInterface): Promise<void> {
 async function commit($: EngineInterface, state: DesignState): Promise<void> {
   await update($, customAtom, () => state.custom)
   await update($, prefsAtom, () => state.prefs)
+  await publishTheme($)
   await $.store.set('custom', state.custom)
   await savePrefs($, state.prefs)
 }
@@ -393,12 +435,14 @@ export const register: Register = on => {
   // Times every call and counts the main loop's calls and changed lines.
   on('tool.call', async ($, e, next) => {
     const startedAt = await $.clock.now()
+    // A subagent's calls have no row on the main transcript, so they are not counted.
+    const isMain = e.agentId === undefined
     const ran = await next(e)
     const ms = (await $.clock.now()) - startedAt
 
     await update($, memberOf(durationAtom, { requestId: e.tool_use_id }), () => ms)
 
-    if (e.agentId === undefined && e.tool !== DESIGN && ran.deny === undefined) {
+    if (isMain && e.tool !== DESIGN && ran.deny === undefined) {
       const diff = diffstat(ran.result)
       stats = {
         tools: stats.tools + 1,
@@ -523,10 +567,17 @@ reply width: ${lastColumns} columns`
     const diff = diffstat(e.props.output)
     const target = summarize(e.props.tool, e.props.input, await $.session.cwd())
 
-    return toolRow(lookOf($.ui.resolve(e), active, e.surface), e.props, kind, target, {
-      ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
-      ...(diff === null ? {} : diff),
-    })
+    return toolRow(
+      lookOf($.ui.resolve(e), active, e.surface),
+      e.props,
+      kind,
+      target,
+      {
+        ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
+        ...(diff === null ? {} : diff),
+      },
+      `loop-${e.props.tool_use_id}`,
+    )
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
@@ -536,7 +587,9 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
-    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls)
+    const ids = e.props.calls.flatMap(call => (call.tool_use_id === undefined ? [] : [call.tool_use_id]))
+    // Keyed by the group's first call, so the Client stays as the group's calls end.
+    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls, `loop-${ids[0]}`)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -547,6 +600,14 @@ reply width: ${lastColumns} columns`
     }
     const look = active === null ? undefined : lookOf($.ui.resolve(e), active, e.surface, copy)
     const columns = e.viewport?.columns ?? 100
+    // A result is drawn once its call is done, so its card animates on its first draw only,
+    // then settles like a reply's (see settleReply).
+    const toolCard = async (kind: 'diff' | 'terminal', draw: () => ReturnType<typeof diffCard>) => {
+      const seen = sawToolCard(e, kind)
+      await read($, memberOf(settledAtom, e))
+      if (!seen) settleReply($, e)
+      return drawOnce(seen, draw)
+    }
 
     // The desktop gets cards: a diff for an edit, a terminal for a shell command.
     if (look?.svg !== undefined && EDITS.has(e.props.tool) && !e.props.isErrored) {
@@ -555,7 +616,7 @@ reply width: ${lastColumns} columns`
       if (diff !== null) {
         const shown = shortenPath(diff.path, await $.session.cwd())
 
-        return drawOnce(redraw(drawKey(e)), () => diffCard(look, look.svg!, diff, shown, columns))
+        return toolCard('diff', () => diffCard(look, look.svg!, diff, shown, columns))
       }
     }
 
@@ -563,7 +624,7 @@ reply width: ${lastColumns} columns`
       const shell = shellOutputOf(e.props.output)
 
       if (shell !== null) {
-        return drawOnce(redraw(drawKey(e)), () => terminalCard(look, look.svg!, shell, e.props.isErrored, columns))
+        return toolCard('terminal', () => terminalCard(look, look.svg!, shell, e.props.isErrored, columns))
       }
     }
 
@@ -617,10 +678,16 @@ reply width: ${lastColumns} columns`
     }
 
     const svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    // Only a vector card animates, so only its draws are remembered.
-    const fresh = svg === undefined ? undefined : freshRows(drawKey(e), segments)
+    // Only a code card animates, so only a reply with one is remembered and settles.
+    const hasCard = svg !== undefined && segments.some(segment => segment.kind === 'code')
+    const seen = hasCard && sawReplyCards(e, segments)
 
-    return drawOnce(fresh !== undefined, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg, fresh))
+    if (hasCard) {
+      await read($, memberOf(settledAtom, e))
+      if (!seen) settleReply($, e)
+    }
+
+    return drawOnce(seen, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg))
   })
 
   // The terminal's spinner gets the skin's word with a shimmer; the desktop's keeps its
@@ -637,7 +704,7 @@ reply width: ${lastColumns} columns`
 
       return look.svg === undefined
         ? next(e)
-        : desktopSpinnerRow(look, look.svg, e.props.mode, e.props.message ?? e.props.word)
+        : desktopSpinnerRow(look, look.svg, e.props.mode, e.props.message ?? e.props.word, 'loop-spinner')
     }
 
     const word = pick(active.skin.spinner, e.props.word) ?? e.props.word
@@ -670,6 +737,9 @@ reply width: ${lastColumns} columns`
   // The band above the prompt: context and plan limits. A survey keeps its place. Another
   // mod's drawing there stays above the band, whatever order the hooks run in, so the band
   // sits last, nearest the prompt. Only the desktop spaces them: a terminal gap is a whole row.
+  // As that row comes and goes, the area above the prompt grows and shrinks by it and the gap;
+  // the band holds still against the prompt only. Holding the area's height would keep room for
+  // a row not drawn, of a height only that mod knows; the engine offers no way, so it is skipped.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const active = await activeSkin($)
     const usage = await read($, usageAtom)
@@ -682,6 +752,8 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
+    const starts = ramp(meters, now)
+    const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
     // With no mod's row above, what comes back is the engine's own band, by reference, which
@@ -707,8 +779,7 @@ reply width: ${lastColumns} columns`
       )
     }
 
-    const starts = ramp(meters, now)
-    if (settle === undefined && starts.some((start, i) => start !== meters[i]?.percent)) {
+    if (settle === undefined && isGrowing) {
       settle = $.clock.after(SETTLE_MS, () => {
         settle = undefined
         return update($, usageAtom, usage => ({ ...usage }))

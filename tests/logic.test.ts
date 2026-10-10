@@ -4,14 +4,15 @@ import { DEFAULT_PREFS, parsePrefs, runSkinCommand } from '../hooks/command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from '../hooks/custom'
 import { runDesign } from '../hooks/designer'
 import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
-import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
+import { columnWidths, cutCell, padCell, plainTable, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
-import { MAX_ALT } from '../hooks/svg-kit'
+import { holdStill, isLooping, MAX_ALT, measure } from '../hooks/svg-kit'
+import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
-import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
+import { fitColumns } from '../hooks/table-card'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
-import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
-import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
+import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, RING_W, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
+import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, selectionOf, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
@@ -93,10 +94,17 @@ test('tables and closed code fences are split out of a reply, and a fence keeps 
     header: ['Route', 'Limit'],
     align: ['left', 'right'],
     rows: [
-      ['/chat', '60'],
+      ['/chat', '**60**'],
       ['/up', '10'],
     ],
   })
+})
+
+test('a table keeps its cells\u2019 markdown as written, escaped pipes too; the terminal\u2019s plain grid drops the marks', async () => {
+  const [table] = splitReply('| `a` \\| b | **c** |\n|---|---|\n| [x](https://x.dev) | __y__ |')
+
+  expect(table).toEqual({ kind: 'table', header: ['`a` \\| b', '**c**'], align: ['left', 'left'], rows: [['[x](https://x.dev)', '__y__']] })
+  expect(table?.kind === 'table' && plainTable(table)).toEqual({ kind: 'table', header: ['a | b', 'c'], align: ['left', 'left'], rows: [['[x](https://x.dev)', 'y']] })
 })
 
 test('columns narrow from the widest until the table fits, and cells pad to their side', async () => {
@@ -105,6 +113,14 @@ test('columns narrow from the widest until the table fits, and cells pad to thei
   expect(columnWidths(table, 20, 3)).toEqual([15, 2])
   expect(padCell('abc', 6, 'right')).toBe('   abc')
   expect(padCell('abcdefgh', 5, 'left')).toBe('abcd…')
+})
+
+test('wide characters measure about an em on the desktop, twice a Latin letter', async () => {
+  const ratio = measure('設定ファ', false, 15) / measure('abcd', false, 15)
+
+  expect(ratio).toBeGreaterThanOrEqual(1.8)
+  expect(ratio).toBeLessThanOrEqual(2)
+  expect(measure('中文', true, 15)).toBeGreaterThanOrEqual(1.8 * 0.54 * 15)
 })
 
 test('wide characters count two cells, so CJK cells are measured and cut in terminal cells', async () => {
@@ -177,43 +193,6 @@ test('stored prefs that are stale or hand-edited fall back to defaults', async (
   expect(parsePrefs(undefined, NAMES)).toEqual(DEFAULT_PREFS)
   expect(parsePrefs({ skin: 'gone', icons: 'x', rail: 'yes' }, NAMES)).toEqual(DEFAULT_PREFS)
   expect(parsePrefs({ skin: 'off', rail: false }, NAMES).rail).toBe(false)
-})
-
-test('cells are read as colours, diffs, numbers, code or text', async () => {
-  expect(kindOfCell('#7aa2f7')).toBe('colour')
-  expect(kindOfCell('+18 −3')).toBe('diff')
-  expect(kindOfCell('120')).toBe('number')
-  expect(kindOfCell('2.1s')).toBe('number')
-  expect(kindOfCell('apps/hub/server.ts')).toBe('code')
-  expect(kindOfCell('Added a limiter')).toBe('text')
-  expect(measure('MMMM', false)).toBeDefined()
-})
-
-test('a vector table stays within its width and escapes what it draws', async () => {
-  const card = tableSvg(
-    { kind: 'table', header: ['a', 'b'], align: ['left', 'right'], rows: [['<b>', 'Q'.repeat(400)]] },
-    tokyoNight.palette,
-    5000,
-  )
-
-  expect(card.width).toBe(1600)
-  expect(tableSvg({ kind: 'table', header: ['a'], align: ['left'], rows: [['b']] }, tokyoNight.palette, 700).width).toBe(700)
-  // A long cell wraps instead of being cut: every one of its 400 characters is drawn.
-  expect(card.source).not.toContain('…')
-  expect((card.source.match(/Q+/g) ?? []).join('').length).toBe(400)
-  expect(card.source).toContain('&lt;b&gt;')
-  expect(card.source).not.toContain('<b>')
-  expect(card.source).toContain('prefers-reduced-motion')
-})
-
-test('a long table rises in within a quarter second, its rows visible without the animation', async () => {
-  const rows = Array.from({ length: 40 }, (_, i) => [`row ${i}`])
-  const card = tableSvg({ kind: 'table', header: ['a'], align: ['left'], rows }, tokyoNight.palette, 700)
-  const delays = [...card.source.matchAll(/animation-delay:(\d+)ms/g)].map(match => Number(match[1]))
-
-  expect(delays.length).toBe(40)
-  expect(Math.max(...delays) - Math.min(...delays)).toBeLessThanOrEqual(250)
-  expect(card.source).not.toContain('.row{opacity:0')
 })
 
 test('a copied patch names the file relative to the session, or by its absolute path outside it', async () => {
@@ -293,6 +272,10 @@ test('code is split into comments, strings, numbers and keywords by language', a
   expect(codeSvg('a\nb', 'ts', tokyoNight.palette, 600).source).toContain('TS')
 })
 
+// Every image of a band, in order, as one string.
+const drawnBand = (built: ReturnType<typeof usageSvg>): string =>
+  [...built.rings.flatMap(({ ring, text }) => [ring.source, text.source]), built.bar?.source ?? ''].join('')
+
 test('plan limits read as 5h and 7d, and a meter warns as it fills', async () => {
   expect(limitLabel('five_hour')).toBe('5h')
   expect(limitLabel('seven_day')).toBe('7d')
@@ -301,9 +284,10 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
     { label: '5h', percent: 100 },
   ])
   expect(meterColor(85, tokyoNight.palette)).toBe(tokyoNight.palette.warn)
-  expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
+  expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).rings[0]?.ring.alt).toBe('context 42%')
   // The ring reads `tmrw`; a reader hears the word.
-  expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
+  const { ring, text } = usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).rings[0] ?? {}
+  expect(`${ring?.alt} (${text?.alt})`).toBe('5h 19% (resets tomorrow 9:00am)')
 })
 
 test('the breakdown bar draws no names, its alt carries every part, and one-colour parts step down in opacity', async () => {
@@ -311,10 +295,11 @@ test('the breakdown bar draws no names, its alt carries every part, and one-colo
   const opacitiesOf = (source: string): number[] => [...source.matchAll(/<rect class="part" [^>]*fill-opacity="([\d.]+)"/g)].map(m => Number(m[1]))
 
   for (const [palette, bg] of [[noir.palette, '#262624'], [forTheme(noir, true).palette, LIGHT_BG]] as const) {
-    const { source, alt } = usageSvg([{ label: 'context', percent: 48 }], palette, [], false, parts)
+    const built = usageSvg([{ label: 'context', percent: 48 }], palette, [], parts)
+    const source = drawnBand(built)
 
     expect(source).not.toContain('msgs')
-    expect(alt).toBe('context 48%; context holds msgs 61%, tools 22%, sys 9%, memory 8%')
+    expect(built.bar?.alt).toBe('context holds msgs 61%, tools 22%, sys 9%, memory 8%')
     expect(opacitiesOf(source)).toEqual([1, 0.8, 0.62, 0.48])
     // The three largest segments read at 3:1 on the page and on their track.
     for (const [i, slot] of (['user', 'run', 'read'] as const).entries()) {
@@ -327,7 +312,7 @@ test('the breakdown bar draws no names, its alt carries every part, and one-colo
   // A skin with a colour per part keeps them at full strength, and so do colours only near each other.
   const near = { ...tokyoNight.palette, user: '#7aa2f7', run: '#7ba3f6', read: '#7ca4f5', write: '#7da5f4' }
   for (const palette of [tokyoNight.palette, near]) {
-    expect(opacitiesOf(usageSvg([{ label: 'context', percent: 48 }], palette, [], false, parts).source)).toEqual([1, 1, 1, 1])
+    expect(opacitiesOf(usageSvg([{ label: 'context', percent: 48 }], palette, [], parts).bar?.source ?? '')).toEqual([1, 1, 1, 1])
   }
 })
 
@@ -390,10 +375,151 @@ test('the breakdown keeps what fills the window, largest first, as shares of it'
   expect(partsOf([])).toEqual([])
 })
 
-test('a long cell wraps on its words, breaks a word too long for the column, and caps its lines', async () => {
-  expect(wrapCell('the quick brown fox jumps', 90, false)).toEqual(['the quick', 'brown fox', 'jumps'])
-  expect(wrapCell('x'.repeat(30), 60, true).every(line => measure(line, true) <= 60)).toBe(true)
-  expect(wrapCell('word '.repeat(80), 60, false, 2).at(-1)).toMatch(/…$/)
+test('the context ring is a jog ring whose unlit segments chase toward 12, faster and hotter as it fills', async () => {
+  const { palette } = tokyoNight
+  const circumference = 2 * Math.PI * 8
+  const band = (context: number) => drawnBand(usageSvg([{ label: 'context', percent: context }, { label: '5h', percent: 19 }, { label: '7d', percent: 23 }], palette))
+  const chase = (context: number) => {
+    const heads = [...band(context).matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog ([\d.]+)s/g)]
+    return { angles: heads.map(m => Number(m[3])), colors: [...new Set(heads.map(m => m[1]))], seconds: [...new Set(heads.map(m => Number(m[4])))], resting: heads.map(m => m[2]) }
+  }
+  const arc = (source: string) => source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1]
+
+  const warned = band(74)
+  expect(warned).toContain('<mask id="jog"')
+  expect(warned).toContain('<g mask="url(#jog)">')
+  // The mask's dash and gap repeat twelve times around the ring.
+  const [dash = 0, gap = 0] = warned.match(/<mask[^>]*><circle[^>]* stroke-dasharray="([\d.]+) ([\d.]+)"/)?.slice(1).map(Number) ?? []
+  expect(Math.abs((dash + gap) * 12 - circumference)).toBeLessThan(0.001)
+  expect(arc(warned)).toBe(palette.warn)
+  expect(warned).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  // Reduced motion leaves the next segment up at .4 and the rest dark.
+  expect(chase(74)).toEqual({ angles: [180, 210, 240], colors: [palette.warn], seconds: [2.4], resting: ['0.4', '0', '0'] })
+  expect(warned).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
+  expect(chase(70).angles).toEqual([150, 180, 210, 240])
+
+  // Below Compact it chases slowly and faintly in the accent, a bit brighter once Compact shows.
+  expect(chase(20)).toMatchObject({ angles: [-30, 0, 30, 60, 90, 120, 150, 180, 210, 240], colors: [palette.user], seconds: [4] })
+  expect(band(20)).toContain('18%{opacity:0.35}')
+  expect(chase(55)).toMatchObject({ angles: [120, 150, 180, 210, 240], colors: [palette.user], seconds: [3] })
+  expect(band(55)).toContain('18%{opacity:0.5}')
+
+  // From 90% one segment is left, blinking in the error colour; from 97% the arc dims on its beat.
+  const full = band(92)
+  expect(chase(92)).toMatchObject({ angles: [240], colors: [palette.err], seconds: [1.2] })
+  expect(arc(full)).toBe(palette.err)
+  expect(full).not.toContain('dim 1.2s')
+  expect(chase(99)).toMatchObject({ angles: [240], colors: [palette.err], seconds: [1.2] })
+  expect(band(99)).toContain('@keyframes dim{50%{opacity:.6}}')
+  expect(band(99)).toContain(',dim 1.2s ease-in-out infinite"')
+
+  // The plan rings share the twelve segments under their own masks, square-ended, in their
+  // meter colour; well short of the limit they hold still.
+  for (const source of [warned, full]) {
+    const plans = source.slice(source.indexOf('</text>'))
+    expect(plans.match(/<mask id="jog"/g)?.length).toBe(2)
+    expect(plans.match(/<g mask="url\(#jog\)">/g)?.length).toBe(2)
+    expect(plans.match(/<circle/g)?.length).toBe(6)
+    expect(plans).not.toContain('animation:jog')
+    expect(plans).not.toContain('linecap')
+    expect(arc(plans)).toBe(meterColor(19, palette))
+  }
+})
+
+test('a plan ring is a still jog ring until 80%, then chases in the warning colour, and from 95% blinks its last segment', async () => {
+  const { palette } = tokyoNight
+  for (const label of ['5h', '7d']) {
+    const ring = (percent: number) => {
+      const source = drawnBand(usageSvg([{ label, percent }], palette))
+      const heads = [...source.matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog ([\d.]+)s/g)]
+      return {
+        source,
+        arc: source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1],
+        chase: { angles: heads.map(m => Number(m[3])), colors: [...new Set(heads.map(m => m[1]))], seconds: [...new Set(heads.map(m => Number(m[4])))], resting: heads.map(m => m[2]) },
+      }
+    }
+
+    const still = ring(79)
+    expect(still.source).toContain('<g mask="url(#jog)">')
+    expect(still.source).not.toContain('@keyframes jog')
+    expect(still.chase.angles).toEqual([])
+    expect(still.arc).toBe(meterColor(79, palette))
+
+    const near = ring(85)
+    expect(near.arc).toBe(palette.warn)
+    expect(near.chase).toEqual({ angles: [210, 240], colors: [palette.warn], seconds: [3], resting: ['0.4', '0'] })
+    expect(near.source).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
+
+    const over = ring(96)
+    expect(over.arc).toBe(palette.err)
+    expect(over.chase).toEqual({ angles: [240], colors: [palette.err], seconds: [1.2], resting: ['0.4'] })
+    expect(over.source).toContain('18%{opacity:0.75}')
+    expect(over.source).not.toContain('dim')
+    expect(over.source).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
+  }
+
+  // Beside a chasing context ring, each ring chases on its own keyframes, in its own image.
+  const [context, plan] = usageSvg([{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }], palette).rings
+  expect(context?.ring.source).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  expect(plan?.ring.source).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
+})
+
+test('a ring is an image of its reading alone: its note, the bar and the other rings leave it the same', async () => {
+  const { palette } = tokyoNight
+  const parts = partsOf([{ name: 'Messages', tokens: 61 }, { name: 'System tools', tokens: 22 }])
+  const a = usageSvg([{ label: 'context', percent: 74, note: '148k/200k' }, { label: '5h', percent: 85, note: '2:40pm' }, { label: '7d', percent: 99 }], palette, [74, 85, 99], parts)
+  const b = usageSvg([{ label: 'context', percent: 74, note: '150k/200k' }, { label: '5h', percent: 85, note: 'tmrw 9:00am' }, { label: '7d', percent: 99, note: 'Mon 9:00am' }], palette, [74, 85, 99], [])
+
+  expect(b.rings.map(({ ring }) => ring.source)).toEqual(a.rings.map(({ ring }) => ring.source))
+  expect(b.rings.map(({ ring }) => ring.alt)).toEqual(['context 74%', '5h 85%', '7d 99%'])
+  // The same reading as the 5h ring, on the 7d ring, draws the same image.
+  expect(usageSvg([{ label: '7d', percent: 85 }], palette, [85]).rings[0]?.ring.source).toBe(a.rings[1]?.ring.source)
+  for (const { ring } of a.rings) {
+    expect(ring.source).not.toContain('<text')
+    expect(ring.width).toBe(RING_W)
+  }
+
+  // Its loops start at fixed offsets: one segment a step after the one before, never a time.
+  const delays = (source = '') => [...source.matchAll(/(-?\d+)ms infinite/g)].map(m => Number(m[1]))
+  expect(delays(a.rings[0]?.ring.source)).toEqual([0, 240, 480])
+  expect(drawnBand(a)).not.toMatch(/-\d+ms/)
+
+  // The images side by side are as wide as the band.
+  const widths = [...a.rings.flatMap(({ ring, text }) => [ring.width, text.width]), a.bar?.width ?? 0]
+  expect(widths.reduce((sum, width) => sum + width, 0)).toBe(a.width)
+  expect(a.rings.map(({ text }) => text.alt)).toEqual(['148k/200k tokens', 'resets 2:40pm', ''])
+})
+
+test('a growing ring changes once, when it settles; held still every looping image holds still', async () => {
+  const { palette } = tokyoNight
+  const growing = usageSvg([{ label: 'context', percent: 55 }], palette, [40]).rings[0]?.ring.source ?? ''
+  const settled = usageSvg([{ label: 'context', percent: 55 }], palette, [55]).rings[0]?.ring.source ?? ''
+
+  expect(growing).toContain('@keyframes fill{from{stroke-dasharray:')
+  expect(growing).toContain('animation:fill .9s cubic-bezier(.2,.8,.2,1)"')
+  expect(settled).not.toContain('fill .9s')
+  expect(usageSvg([{ label: 'context', percent: 55 }], palette, [40]).rings[0]?.ring.source).toBe(growing)
+
+  holdStill(true)
+  try {
+    for (const source of [usageSvg([{ label: 'context', percent: 99 }], palette, [99]).rings[0]?.ring.source ?? '', toolIcon('run', '#fff', true), spinnerIcon('responding', '#fff')]) {
+      expect(source).toContain('*{animation:none!important}</style>')
+    }
+  } finally {
+    holdStill(false)
+  }
+
+  expect(toolIcon('run', '#fff', true)).not.toContain('*{animation:none!important}</style>')
+})
+
+test('a running arc and every spinner loop from fixed offsets, the bars and dots .15s apart', async () => {
+  for (const source of [toolIcon('run', '#fff', true), ...(['thinking', 'tool-use', 'responding', 'requesting'] as const).map(mode => spinnerIcon(mode, '#fff'))]) {
+    expect(source).toContain('infinite')
+    expect(source).not.toMatch(/-\d+ms/)
+  }
+
+  expect(spinnerIcon('responding', '#fff')).toContain('.b2{animation-delay:.15s}.b3{animation-delay:.3s}')
+  expect(spinnerIcon('requesting', '#fff')).toContain('.d2{animation-delay:.15s}.d3{animation-delay:.3s}')
 })
 
 test('short columns keep their width and long ones share the rest', async () => {
@@ -401,7 +527,17 @@ test('short columns keep their width and long ones share the rest', async () => 
 
   expect(hash).toBe(20)
   expect(who).toBe(60)
-  expect(Math.round((why ?? 0) + 20 + 60 + 2 * 28 + 2 * 24)).toBe(700)
+  expect(Math.round((why ?? 0) + 20 + 60)).toBe(700)
+})
+
+test('a column is never narrower than its longest word while the table has room, the widest columns giving way', async () => {
+  // Two short columns are raised to their words; the wide one gives up the width.
+  const [first, second, third] = fitColumns([300, 40, 900], 600, [150, 40, 80])
+  expect(first).toBeGreaterThanOrEqual(150)
+  expect(second).toBe(40)
+  expect(Math.round((first ?? 0) + (second ?? 0) + (third ?? 0))).toBe(600)
+  // A word wider than the whole table still breaks.
+  expect(fitColumns([2000], 600, [2000])).toEqual([600])
 })
 
 test('a light palette is derived with dark text, light bands and deepened colours', async () => {
@@ -437,7 +573,7 @@ test('a pinned folder keeps its own prefs, others follow the default', async () 
   expect(parseFolders('junk', NAMES)).toEqual({})
 })
 
-test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async () => {
+test('every skin reads at 4.5:1 on both host backgrounds, dark and light, and its selection at 5:1', async () => {
   const roles = ['read', 'write', 'run', 'search', 'web', 'mcp', 'other', 'user', 'fg', 'muted', 'ok', 'err', 'warn'] as const
   const made = resolveSkin('my-noir', { 'my-noir': { name: 'my-noir', label: 'x', base: 'noir', palette: {}, spinner: [], done: [] } })
   const dark = ['#262624', '#1f1e1d']
@@ -454,6 +590,9 @@ test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async
     }
 
     for (const [mode, palette, bgs] of [['dark', skin.palette, dark], ['light', forTheme(skin, true).palette, [LIGHT_BG]]] as const) {
+      // The published selection: body text reads on it at 5:1.
+      expect(`${skin.name} ${mode} selection ${contrast(palette.fg, selectionOf(palette)) >= 5}`).toBe(`${skin.name} ${mode} selection true`)
+
       for (const bg of bgs) {
         // A changed line's text, numbers and sign sit on its tint, at 4.5:1.
         for (const tint of [palette.ok, palette.err]) {
@@ -485,3 +624,4 @@ test('a made skin keeps its base skin\'s light palette, and derives the slots it
   expect(light?.read).not.toBe('#111111')
   expect(contrast(light?.read ?? '#ffffff', LIGHT_BG)).toBeGreaterThanOrEqual(4.5)
 })
+

@@ -11,9 +11,8 @@ import type { Kind, Palette } from '../hooks/skin'
 import { codeSvg } from '../hooks/svg-code'
 import { diffSvg } from '../hooks/svg-diff'
 import { escape, FONT, MONO } from '../hooks/svg-kit'
-import { tableSvg } from '../hooks/svg-table'
 import { terminalSvg } from '../hooks/svg-terminal'
-import { partsOf, usageSvg } from '../hooks/svg-usage'
+import { BAND_H, partsOf, usageSvg } from '../hooks/svg-usage'
 import noir from '../hooks/themes/noir'
 
 const OUT = join(import.meta.dirname, '..', 'docs', 'previews')
@@ -71,23 +70,6 @@ function hero(palette: Palette): string {
     WIDTH,
   )
   add(place(diff.source, 0, y), diff.height, 18)
-  add(text(0, y + 14, 'Every route is now limited per user:', palette.fg), 18, 10)
-
-  const table = tableSvg(
-    {
-      kind: 'table',
-      header: ['Route', 'Limit', 'Window', 'Store'],
-      align: ['left', 'right', 'left', 'left'],
-      rows: [
-        ['/chat', '60', '1 min', 'memory'],
-        ['/upload', '10', '1 min', 'SQLite'],
-        ['/search', '120', '5 min', 'memory'],
-      ],
-    },
-    palette,
-    WIDTH,
-  )
-  add(place(table.source, 0, y), table.height, 18)
   add(place(spinnerIcon('responding', palette.user), 0, y - 2) + text(28, y + 13, 'Writing the reply', palette.muted), 18, 4)
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${y}" viewBox="0 0 ${WIDTH} ${y}">${parts.join('')}</svg>`
@@ -107,6 +89,19 @@ function spinners(palette: Palette): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="30" viewBox="0 0 ${WIDTH} 30">${items}</svg>`
 }
 
+// The band as the desktop lays it out: its images side by side, each drawn on its own.
+function band(...args: Parameters<typeof usageSvg>): string {
+  const { rings, bar, width } = usageSvg(...args)
+  let x = 0
+  const images = [...rings.flatMap(({ ring, text }) => [ring, text]), ...(bar === undefined ? [] : [bar])].map(piece => {
+    const markup = `<image x="${x}" width="${piece.width}" height="${BAND_H}" href="data:image/svg+xml,${encodeURIComponent(piece.source)}"/>`
+    x += piece.width
+    return markup
+  })
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${BAND_H}" viewBox="0 0 ${width} ${BAND_H}">${images.join('')}</svg>`
+}
+
 function write(name: string, source: string | Built): void {
   writeFileSync(join(OUT, `${name}.svg`), typeof source === 'string' ? source : source.source)
 }
@@ -121,7 +116,7 @@ for (const [theme, palette] of [
   write(`spinners-${theme}`, spinners(palette))
   write(`terminal-${theme}`, terminalSvg({ stdout: ' Test Files  12 passed (12)\n      Tests  148 passed (148)\n   Duration  3.41s', stderr: '', interrupted: false }, false, palette, WIDTH))
   write(`code-${theme}`, codeSvg(['// Rate limit per route, keyed by user', 'export function limit(route: string, perMinute = 60) {', '  const used = new Map<string, number>()', '  return (user: string) => (used.get(user) ?? 0) < perMinute', '}'].join('\n'), 'ts', palette, WIDTH))
-  write(`usage-${theme}`, usageSvg([{ label: 'context', percent: 42, note: '84k/200k' }, { label: '5h', percent: 18, note: '2:40pm' }, { label: '7d', percent: 61, note: 'Mon 9:00am' }], palette, [], false, partsOf([{ name: 'Messages', tokens: 51_000 }, { name: 'System tools', tokens: 19_000 }, { name: 'System prompt', tokens: 8_000 }, { name: 'Memory files', tokens: 6_000 }])).source)
+  write(`usage-${theme}`, band([{ label: 'context', percent: 42, note: '84k/200k' }, { label: '5h', percent: 18, note: '2:40pm' }, { label: '7d', percent: 61, note: 'Mon 9:00am' }], palette, [], partsOf([{ name: 'Messages', tokens: 51_000 }, { name: 'System tools', tokens: 19_000 }, { name: 'System prompt', tokens: 8_000 }, { name: 'Memory files', tokens: 6_000 }])))
 }
 
 const page = (background: string, theme: string) =>

@@ -10,7 +10,7 @@ a settings page, and your own agent can design a new skin with you.
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/previews/hero-light.svg">
-  <img alt="A Claude Code turn with the noir skin: tool rows with icons, an edit as a diff card, and a table card" src="docs/previews/hero-dark.svg">
+  <img alt="A Claude Code turn with the noir skin: tool rows with icons, an edit as a diff card, and the writing spinner" src="docs/previews/hero-dark.svg">
 </picture>
 
 <picture>
@@ -49,25 +49,27 @@ Needs Claude Code 2.1.287 or later, in a terminal or the desktop app's Code tab.
 | Site | Desktop app | Terminal |
 |---|---|---|
 | Tool calls | A line icon per kind, a spinning ring while it runs, a cross when it failed and a dotted ring when interrupted, lines changed and time taken | A node on the turn's rail with the same facts |
-| Edits | A diff card: file, `+N −M`, the first lines changed, numbered, in green and red, and a Copy diff button for the whole patch; the alt text carries the patch too, capped at 4000 characters, with paths relative to the session (`a/` and `b/`) | Claude Code's own diff |
-| Shell commands | A terminal card: status pill, output with stderr apart, long output folded, and a Copy button for the output | Claude Code's own output |
-| Tables in replies | An animated card: header rule, zebra rows, swatches for colours, coloured diffs; Copy gives the markdown | A cell grid with a header band and zebra rows, and the same Copy |
-| Code blocks in replies | A card with the language, line numbers and highlighting, and a Copy button | Claude Code's own markdown, and a Copy button |
+| Edits | A diff card: file, `+N −M`, the first lines changed, numbered, in green and red, and a copy button for the whole patch; the alt text carries the patch too, capped at 4000 characters, with paths relative to the session (`a/` and `b/`) | Claude Code's own diff |
+| Shell commands | A terminal card: status pill, output with stderr apart, long output folded, and a copy button for the output | Claude Code's own output |
+| Tables in replies | A rounded card of real text, not an image: a header band in muted capitals, zebra rows, each cell drawn as markdown so links click, text selects and inline code and bold show as in a reply, long cells wrapped in full, a column never narrower than its longest word; a copy button in its top-right corner, which gives the markdown. A table of more than 12 columns, or one that would take a reply's grids past 1500 elements (the app refuses a reply of more than 2000), stays markdown, with a copy button under it | A cell grid with a header band and zebra rows, and the same copy button |
+| Code blocks in replies | A card with the language, line numbers and highlighting, and a copy button | Claude Code's own markdown, and a copy button |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
-| Above the prompt | A band as tall as the PR bar and the input: rings for context (with its tokens, `96k/200k`) and each plan limit (with when it resets: `2:40pm` today, `tmrw 9:00am`, `Mon 9:00am` within the week, `next Fri 9:00am` a week off; none once it has passed), a thin bar of what fills the context as /context counts it (each part's name and share in its alt text, `msgs 61%, tools 22%, …`), a Compact button from 50% context, and from 70% a "Compact now" nudge with a soft halo pulsing on the context ring. A narrow band drops the bar first, then the resets and the tokens; the Compact button never moves for them. A reset's label redraws at midnight and when it passes. Another mod's drawing there sits above the band, so the band stays nearest the prompt | Block meters with the same tokens and resets, the parts as a row of coloured cells, and the same button, pressed with `c` once ctrl+x tab focuses the band |
+| Above the prompt | A band as tall as the PR bar and the input: rings for context (with its tokens, `96k/200k`) and each plan limit (with when it resets: `2:40pm` today, `tmrw 9:00am`, `Mon 9:00am` within the week, `next Fri 9:00am` a week off; none once it has passed), a thin bar of what fills the context as /context counts it (each part's name and share in its alt text, `msgs 61%, tools 22%, …`), a Compact button from 50% context, and from 70% a "Compact now" nudge. The context ring is a CDJ-style jog ring of 12 segments whose unlit ones light in turn toward 12 o'clock, faster and brighter as it fills: faint in the accent, warn from 70%, and from 90% one segment blinking in the error colour, the arc dimming on the same beat from 97%. The plan limit rings share the 12 segments and hold still until 80%, then chase slowly in warn, and from 95% blink their last segment in the error colour. A narrow band drops the bar first, then the resets and the tokens; the Compact button never moves for them. A reset's label redraws at midnight and when it passes. Another mod's drawing there sits above the band, so the band stays nearest the prompt; as that drawing comes and goes, the area grows and shrinks above the band | Block meters with the same tokens and resets, the parts as a row of coloured cells, and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
 | Your prompts | A rounded outline sized to what you typed; attached images stay below it | The same |
 | The question dialog | A band naming its topics above Claude Code's own dialog | The same |
 
 A card rises in row by row on its first draw only, the last row starting within a quarter second of
 the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
-theme change) never replays it. A table that streams in rises only the rows added since its last draw.
+theme change) never replays it. A code, diff or terminal card scrolled back into view, or drawn again under
+a new request, holds still. A table draws no animation, so there is nothing to replay.
+On the desktop a redraw never restarts a running loop: the spinner, a running call's icon and the band's rings each keep their own place.
 The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s
 after a change the band settles still, so nothing replays. The context bar never animates. Its parts
 are the local estimate /context makes, which sends no requests, read whenever the band's numbers refresh. Reduced motion holds the icons, the cards,
-the band's rings and the pulse still, whether it is the system's setting or
-Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each Copy button says what it
-copies: table, code, diff or output. A skin only changes what is drawn: the stored
+the band's rings and the jog rings' chase still, whether it is the system's setting or
+Claude Code's own Reduce motion, which also turns the terminal shimmer off. Each card's copy button is the
+icon ⧉ (`[copy]` with ASCII icons), dim until hovered or focused. A skin only changes what is drawn: the stored
 conversation, and what the model reads, are untouched. Agents, plan mode and the permission prompt keep
 Claude Code's own drawing. The default skin is **noir**, black and white. Cards have no background of
 their own, so they sit in the page. On a light Claude Code theme every skin switches to its light palette,
@@ -98,9 +100,10 @@ Your choices are remembered across sessions.
 
 It draws and remembers. It reads the session's directory, your context and plan usage (and, while the band is on, the local estimate of what fills the context), Claude
 Code's theme and Reduce motion settings and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
-compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
+compacts only when you press Compact, and copies only when you press a card's copy button. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
 on macOS, `gsettings get org.gnome.desktop.interface color-scheme` on GNOME); it starts no other
-process, touches no file and makes no network call.
+process, touches no file and makes no network call. It also publishes the drawn skin's colours as `skins.theme`
+(`mode`, `accent`, `foreground`, `dim`, `red`, `selection`, `background`; `null` while the skin is off) for other mods' panels to match.
 Check it yourself:
 
 ```bash

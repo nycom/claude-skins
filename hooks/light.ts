@@ -17,6 +17,16 @@ const toHex = (rgb: readonly number[]): string =>
 export const deepen = (hex: string, amount: number): string =>
   toHex(channels(hex).map(value => value * (1 - amount)))
 
+// `amount` of the way from `hex` to `to`.
+export const mix = (hex: string, to: string, amount: number): string => {
+  const target = channels(to)
+
+  return toHex(channels(hex).map((value, i) => value + ((target[i] ?? 0) - value) * amount))
+}
+
+// The selection other mods' panels are given: a quarter of the accent over the surface.
+export const selectionOf = (palette: Pick<Palette, 'surface' | 'user'>): string => mix(palette.surface, palette.user, 0.25)
+
 // WCAG contrast ratio of two #rrggbb colours.
 export const contrast = (a: string, b: string): number => {
   const luminance = (hex: string) => {
