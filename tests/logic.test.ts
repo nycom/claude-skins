@@ -6,7 +6,7 @@ import { runDesign } from '../hooks/designer'
 import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
-import { holdStill, MAX_ALT } from '../hooks/svg-kit'
+import { held, holdStill, isLooping, MAX_ALT } from '../hooks/svg-kit'
 import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
@@ -659,4 +659,16 @@ test('a made skin keeps its base skin\'s light palette, and derives the slots it
   expect(light?.write).toBe('#111111')
   expect(light?.read).not.toBe('#111111')
   expect(contrast(light?.read ?? '#ffffff', LIGHT_BG)).toBeGreaterThanOrEqual(4.5)
+})
+
+test('held stops a drawing’s endless loops and leaves its one-shot animations to play', () => {
+  const ring =
+    '<svg><style>@keyframes fill{from{stroke-dasharray:0 75}}@keyframes dim{50%{opacity:.6}}.spin{animation:spin .9s linear infinite}</style>' +
+    '<circle style="animation:fill .9s cubic-bezier(.2,.8,.2,1),dim 2s ease-in-out infinite"/></svg>'
+  const still = held(ring)
+
+  expect(still).toContain('animation:fill .9s cubic-bezier(.2,.8,.2,1),')
+  expect(still).not.toContain('*{animation:none!important}')
+  expect(still).not.toContain(' infinite')
+  expect(isLooping(still)).toBe(false)
 })

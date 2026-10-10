@@ -12,7 +12,7 @@ import { clipLines, diffstat, pick } from './format'
 import { splitReply } from './markdown'
 import type { Segment } from './markdown'
 import { askBand, desktopSpinnerRow, diffCard, footerRow, terminalCard, usageBand, groupRow, promptRow, replyRows, spinnerRow, toolRow } from './rows'
-import type { Look, SvgElement, Ui } from './rows'
+import type { ClientElement, Look, SvgElement, Ui } from './rows'
 import { galleryPane } from './gallery'
 import { settingsPane } from './settings'
 import { ICONS } from './skin'
@@ -57,6 +57,16 @@ const compactingAtom = atom({ plugin: 'skins', key: 'compacting' } as const, fal
 const pinnedAtom = atom({ plugin: 'skins', key: 'pinned' } as const, false)
 const themeAtom = atom({ plugin: 'skins', key: 'theme' } as const, null as PanelTheme | null)
 const settledAtom = atom({ plugin: 'skins', key: 'settled' } as const, 0)
+// Per call, whether its icon may move; and how many calls' icons do.
+const loopAtom = atom({ plugin: 'skins', key: 'loop' } as const, false)
+const toolLoopsAtom = atom({ plugin: 'skins', key: 'toolLoops' } as const, 0)
+
+// The animation budget: every looping image costs the desktop's main thread, so at most this
+// many of the skin's move at once. The spinner always keeps one (it can show between turns, as
+// for background tasks), the newest running calls take up to TOOL_LOOPS, and the band's rings
+// what is left; the rest are drawn held.
+const LOOP_BUDGET = 3
+const TOOL_LOOPS = 2
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 
@@ -228,9 +238,9 @@ async function readConfig($: EngineInterface, memo: ConfigMemo): Promise<void> {
 }
 
 // Every surface's element table names Svg, but the terminal draws it as nothing, so
-// vector icons are for the other surfaces only.
+// vector icons are for the other surfaces only; loops move in a Client on the desktop's.
 const lookOf = (
-  ui: Ui & { Svg?: SvgElement },
+  ui: Ui & { Svg?: SvgElement; Client?: ClientElement },
   active: Active,
   surface: RenderSurface,
   copy?: (text: string) => void,
@@ -241,6 +251,7 @@ const lookOf = (
   prefs: active.prefs,
   surface,
   ...(surface !== 'terminal' && ui.Svg !== undefined ? { svg: ui.Svg } : {}),
+  ...(surface === 'desktop' && ui.Client !== undefined ? { client: ui.Client } : {}),
   ...(copy === undefined ? {} : { copy }),
 })
 
@@ -338,6 +349,24 @@ async function commit($: EngineInterface, state: DesignState): Promise<void> {
   await savePrefs($, state.prefs)
 }
 
+// The main loop's calls running now, oldest first. A new session starts with none.
+// ponytail: one list per plugin process, as the turn's stats are; per session if one process
+// ever hosts several at once.
+let running: readonly string[] = []
+
+// Which calls' icons move changes only as a call starts or ends, never on a redraw.
+async function setRunning($: EngineInterface, next: readonly string[]): Promise<void> {
+  const was = new Set(running.slice(-TOOL_LOOPS))
+  running = next
+  const now = new Set(running.slice(-TOOL_LOOPS))
+
+  for (const id of new Set([...was, ...now])) {
+    if (was.has(id) !== now.has(id)) await update($, memberOf(loopAtom, { requestId: id }), () => now.has(id))
+  }
+
+  if (was.size !== now.size) await update($, toolLoopsAtom, () => now.size)
+}
+
 async function designState($: EngineInterface): Promise<DesignState> {
   return { prefs: await read($, prefsAtom), custom: await read($, customAtom) }
 }
@@ -368,6 +397,8 @@ export const register: Register = on => {
     await refreshUsage($)
     await readConfig($, config)
     stopRelabel()
+    await setRunning($, [])
+    await update($, toolLoopsAtom, () => 0)
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -447,12 +478,15 @@ export const register: Register = on => {
   // Times every call and counts the main loop's calls and changed lines.
   on('tool.call', async ($, e, next) => {
     const startedAt = await $.clock.now()
-    const ran = await next(e)
+    // A subagent's calls have no row on the main transcript, so they take no loop.
+    const isMain = e.agentId === undefined
+    if (isMain) await setRunning($, [...running, e.tool_use_id])
+    const ran = await next(e).finally(() => (isMain ? setRunning($, running.filter(id => id !== e.tool_use_id)) : undefined))
     const ms = (await $.clock.now()) - startedAt
 
     await update($, memberOf(durationAtom, { requestId: e.tool_use_id }), () => ms)
 
-    if (e.agentId === undefined && e.tool !== DESIGN && ran.deny === undefined) {
+    if (isMain && e.tool !== DESIGN && ran.deny === undefined) {
       const diff = diffstat(ran.result)
       stats = {
         tools: stats.tools + 1,
@@ -577,10 +611,19 @@ reply width: ${lastColumns} columns`
     const diff = diffstat(e.props.output)
     const target = summarize(e.props.tool, e.props.input, await $.session.cwd())
 
-    return toolRow(lookOf($.ui.resolve(e), active, e.surface), e.props, kind, target, {
-      ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
-      ...(diff === null ? {} : diff),
-    })
+    const moves = await read($, memberOf(loopAtom, { requestId: e.props.tool_use_id }))
+
+    return toolRow(
+      lookOf($.ui.resolve(e), active, e.surface),
+      e.props,
+      kind,
+      target,
+      {
+        ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
+        ...(diff === null ? {} : diff),
+      },
+      moves ? `loop-${e.props.tool_use_id}` : undefined,
+    )
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
@@ -590,7 +633,11 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
-    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls)
+    const ids = e.props.calls.flatMap(call => (call.tool_use_id === undefined ? [] : [call.tool_use_id]))
+    const moves = await Promise.all(ids.map(id => read($, memberOf(loopAtom, { requestId: id }))))
+    const moving = ids.find((_, i) => moves[i])
+
+    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls, moving === undefined ? undefined : `loop-${moving}`)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -704,7 +751,7 @@ reply width: ${lastColumns} columns`
 
       return look.svg === undefined
         ? next(e)
-        : desktopSpinnerRow(look, look.svg, e.props.mode, e.props.message ?? e.props.word)
+        : desktopSpinnerRow(look, look.svg, e.props.mode, e.props.message ?? e.props.word, 'loop-spinner')
     }
 
     const word = pick(active.skin.spinner, e.props.word) ?? e.props.word
@@ -750,6 +797,7 @@ reply width: ${lastColumns} columns`
     }
 
     const starts = ramp(meters, now)
+    const ringLoops = Math.max(0, LOOP_BUDGET - 1 - (await read($, toolLoopsAtom)))
     const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
@@ -800,7 +848,7 @@ reply width: ${lastColumns} columns`
     return (
       <Box flexDirection="column" rowGap={above !== null && look.surface === 'desktop' ? 1 : 0}>
         {above}
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns, ringLoops)}
       </Box>
     )
   })

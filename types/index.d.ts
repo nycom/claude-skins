@@ -74,6 +74,9 @@ declare module 'claude-code' {
       compacting: boolean
       pinned: boolean
       theme: PanelTheme | null
+      // Per call, whether its icon may move; how many calls' icons do.
+      loop: StateFamily<boolean>
+      toolLoops: number
     }
   }
 }

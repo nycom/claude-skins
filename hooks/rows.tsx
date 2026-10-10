@@ -7,10 +7,11 @@ import type { Segment, Table } from './markdown'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
+import type { LoopProps } from './anim'
 import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
-import { PX_PER_COLUMN, cardWidth } from './svg-kit'
+import { PX_PER_COLUMN, cardWidth, held, isLooping } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
@@ -28,6 +29,9 @@ const LOOP_PROPS = LOOPS_INTERACTIVE ? { isInteractive: true } : {}
 // The vector element, on the surfaces that have one (the desktop app).
 export type SvgElement = ElementTable<'desktop'>['Svg']
 
+// A region one of the mod's surface modules draws, on the desktop.
+export type ClientElement = ElementTable<'desktop'>['Client']
+
 export type Look = {
   ui: Ui
   skin: Skin
@@ -36,6 +40,8 @@ export type Look = {
   surface: RenderSurface
   // The vector element where the surface draws one: icons replace glyphs there.
   svg?: SvgElement
+  // Where the surface keeps a module's region across redraws (the desktop): loops draw there.
+  client?: ClientElement
   // Puts text on the clipboard of the surface drawing; absent where nothing can copy.
   copy?: (text: string) => void
 }
@@ -163,22 +169,37 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
   )
 }
 
+// An image that may loop. `key` is the Client it moves in, under the animation budget; with
+// none it is drawn held. The desktop builds an Svg again on every redraw, which starts its
+// loop over, so there a loop is drawn by a Client (anim.tsx), which the desktop keeps across
+// redraws while its props stay the same; with no size of its own, its region is the image's.
+// An image only moves on the main thread: the desktop rasterises an SVG image's frames there,
+// so every loop on screen costs it.
+function loopImage(look: Look, Svg: SvgElement, source: string, image: { alt: string; width: number; height: number }, key?: string) {
+  const isLoop = isLooping(source) && key !== undefined
+  const drawn = { source: isLoop || !isLooping(source) ? source : held(source), ...image, ...LOOP_PROPS }
+  const Client = look.client
+
+  return isLoop && Client !== undefined ? <Client key={key} module="./anim.tsx" props={drawn satisfies LoopProps} /> : <Svg {...drawn} />
+}
+
 // On a surface with vector icons, the icon leads the row in place of the status glyph.
 // Its shape names the kind; a failed or interrupted call adds a mark, and the alt says it.
-function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>) {
+function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>, loop?: string) {
   const { Box } = look.ui
   const { color, word, mark } = status(look, calls)
   const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark)
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={source} alt={`${KIND_LABEL[kind]}, ${word}`} width={16} height={16} {...LOOP_PROPS} />
+      {loopImage(look, Svg, source, { alt: `${KIND_LABEL[kind]}, ${word}`, width: 16, height: 16 }, loop)}
       {line}
     </Box>
   )
 }
 
-export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta) {
+// `loop` is the Client key a running icon moves under; without one it is held.
+export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, loop?: string) {
   const { Text } = look.ui
   const { palette } = look.skin
 
@@ -192,7 +213,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
       </Text>
     )
 
-    return iconRow(look, look.svg, kind, [call], withMeta(look, line, meta))
+    return iconRow(look, look.svg, kind, [call], withMeta(look, line, meta), loop)
   }
 
   const main = (
@@ -207,7 +228,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
 }
 
 // A run of reads and searches on one node: `●─ Read 3 · Search 2`.
-export function groupRow(look: Look, calls: readonly Call[]) {
+export function groupRow(look: Look, calls: readonly Call[], loop?: string) {
   const { Text } = look.ui
   const { palette } = look.skin
   const counts = new Map<Kind, number>()
@@ -226,7 +247,7 @@ export function groupRow(look: Look, calls: readonly Call[]) {
   if (look.svg !== undefined) {
     const lead = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'other'
 
-    return iconRow(look, look.svg, lead, calls, <Text wrap="truncate-end">{parts}</Text>)
+    return iconRow(look, look.svg, lead, calls, <Text wrap="truncate-end">{parts}</Text>, loop)
   }
 
   return stack(
@@ -240,12 +261,12 @@ export function groupRow(look: Look, calls: readonly Call[]) {
 
 // The desktop's spinner row: an animated icon for what the turn is doing, beside the
 // step the desktop names (`Creating notes.md`).
-export function desktopSpinnerRow(look: Look, Svg: SvgElement, mode: SpinnerMode, text: string) {
+export function desktopSpinnerRow(look: Look, Svg: SvgElement, mode: SpinnerMode, text: string, loop?: string) {
   const { Box, Text } = look.ui
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={spinnerIcon(mode, look.skin.palette.user)} alt={mode} width={20} height={20} {...LOOP_PROPS} />
+      {loopImage(look, Svg, spinnerIcon(mode, look.skin.palette.user), { alt: mode, width: 20, height: 20 }, loop)}
       <Text color={look.skin.palette.muted}>{text}</Text>
     </Box>
   )
@@ -536,7 +557,8 @@ function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: numb
 }
 
 // The meters with as many extras as fit `room` columns; with none, whatever their width.
-function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[] = []) {
+// `ringLoops`: how many of the rings may move, the first that loop; the rest are held.
+function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[], ringLoops: number) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
@@ -547,12 +569,14 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
       const Svg = look.svg
       const built = usageSvg(view.meters, palette, starts, view.parts)
 
-      // Each ring an image of its own, so what changes beside it leaves its loop running.
+      // Each ring an image of its own, so a ring under the budget moves in a Client of its own.
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
+        const moving = built.rings.flatMap(({ ring }, i) => (isLooping(ring.source) ? [i] : [])).slice(0, ringLoops)
+
         return (
           <Box flexDirection="row" alignItems="center">
-            {built.rings.flatMap(({ ring, text }) => [
-              <Svg source={ring.source} alt={ring.alt} width={ring.width} height={BAND_H} {...LOOP_PROPS} />,
+            {built.rings.flatMap(({ ring, text }, i) => [
+              loopImage(look, Svg, ring.source, { alt: ring.alt, width: ring.width, height: BAND_H }, moving.includes(i) ? `loop-${view.meters[i]?.label}` : undefined),
               <Svg source={text.source} alt={text.alt} width={text.width} height={BAND_H} />,
             ])}
             {built.bar === undefined ? '' : <Svg source={built.bar.source} alt={built.bar.alt} width={built.bar.width} height={BAND_H} />}
@@ -595,7 +619,16 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 // The band above the prompt: the meters, and from COMPACT_SHOW a Compact button that becomes
 // the main action, with a word on why, once the context is full enough to be worth it. Extras
 // sit between the two and give way first, so the button never moves for them.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void, starts: readonly number[] = [], parts: readonly Part[] = [], columns = Infinity) {
+export function usageBand(
+  look: Look,
+  meters: readonly Meter[],
+  canCompact: boolean,
+  compact: () => void,
+  starts: readonly number[] = [],
+  parts: readonly Part[] = [],
+  columns = Infinity,
+  ringLoops = 0,
+) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
   const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
@@ -610,7 +643,7 @@ export function usageBand(look: Look, meters: readonly Meter[], canCompact: bool
   return (
     // bodyColumns already leave out the engine's collapse mark ([-]) at the right edge.
     <Box flexDirection="row" alignItems="center" columnGap={2}>
-      {meterView(look, meters, parts, columns - reserved, starts)}
+      {meterView(look, meters, parts, columns - reserved, starts, ringLoops)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? (
         <Box flexShrink={0}>
