@@ -90,7 +90,6 @@ async function publishTheme($: EngineInterface): Promise<void> {
           accent: p.user,
           foreground: p.fg,
           dim: p.muted,
-          muted: p.muted,
           red: p.err,
           selection: mix(p.surface, p.user, 0.25),
           background: p.surface,

@@ -495,6 +495,34 @@ test('the band sits last, nearest the prompt, below another mod’s row', async 
   }
 })
 
+test('the band keeps its slot, last and nearest the prompt, as another mod’s row comes and goes', async ($, on) => {
+  let isShown = false
+  on('ui.render', { component: 'AbovePrompt' }, () => (isShown ? { type: 'Text', props: {}, children: ['PROGRESS'] } : { type: 'engine', ref: 0 }))
+  stubEngine(on)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const bandOf = async (shown: boolean) => {
+    isShown = shown
+    const band = await $.ui.mount(BAND('terminal', false))
+    const column = (await band.drawn()) as { children: readonly unknown[] }
+    await band.unmount()
+    return { count: column.children.length, last: JSON.stringify(column.children.at(-1)) }
+  }
+
+  const alone = await bandOf(false)
+  const below = await bandOf(true)
+  const again = await bandOf(false)
+
+  expect([alone.count, below.count, again.count]).toEqual([1, 2, 1])
+  expect(below.last).not.toContain('PROGRESS')
+  expect(below.last).toBe(alone.last)
+  expect(again.last).toBe(alone.last)
+})
+
 test('with nothing drawn above it, the band has no gap or empty row above its rings', async ($, on) => {
   // What the skin's hook reaches when nothing beneath it draws: the engine's own band, by reference,
   // which draws nothing without a survey.
@@ -1554,7 +1582,6 @@ test('the selected skin is published for other mods’ panels, and follows /skin
     accent: '#7aa2f7',
     foreground: '#c0caf5',
     dim: '#878daf',
-    muted: '#878daf',
     red: '#f7768e',
     selection: '#364366',
     background: '#1f2335',

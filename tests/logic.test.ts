@@ -12,7 +12,7 @@ import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/s
 import { fitColumns } from '../hooks/table-card'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
 import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, RING_W, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
-import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
+import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, mix, resolveLight, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
@@ -582,6 +582,9 @@ test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async
     }
 
     for (const [mode, palette, bgs] of [['dark', skin.palette, dark], ['light', forTheme(skin, true).palette, [LIGHT_BG]]] as const) {
+      // The published selection: body text reads at 5:1 on a quarter of the accent over the surface.
+      expect(`${skin.name} ${mode} selection ${contrast(palette.fg, mix(palette.surface, palette.user, 0.25)) >= 5}`).toBe(`${skin.name} ${mode} selection true`)
+
       for (const bg of bgs) {
         // A changed line's text, numbers and sign sit on its tint, at 4.5:1.
         for (const tint of [palette.ok, palette.err]) {
