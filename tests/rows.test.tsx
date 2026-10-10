@@ -477,7 +477,8 @@ test('the band sits last, nearest the prompt, below another mod’s row, and kee
   on('ui.render', { component: 'AbovePrompt' }, () => (isShown ? { type: 'Text', props: {}, children: ['PROGRESS'] } : { type: 'engine', ref: 0 }))
   // The other mod's row comes and goes while the band stays mounted, as it does live. A test's
   // hooks may not write state, so a pref the band does not show draws the band again, the
-  // whole chain with it.
+  // whole chain with it. This holds the band's order, not the area's height: that grows and
+  // shrinks with the row.
   const toggle = async (shown: boolean) => {
     isShown = shown
     await runSkin($, `clip ${shown ? 'off' : 'on'}`)

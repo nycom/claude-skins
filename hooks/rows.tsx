@@ -167,8 +167,11 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
 
 // The text cells a loop's Client takes: a fixed region never resizes, so the desktop never
 // draws it again for that, which would start its loop over.
-// ponytail: a guess at the desktop's body text (about 7px a column, 20px a row); measure a
-// cell live if an icon clips or sits loose.
+// ponytail: a guess at the desktop's cell (about 7px a column, 20px a row), taken low so a
+// region rounds up to more cells than its image needs: loose, never clipped. table-card takes
+// the same cell high (8px) for the inverse sum, pixels a padding takes, so a column never comes
+// up short; PX_PER_COLUMN (6.4) is no cell but the reported width's share of the reply column.
+// Measure a cell live if an icon sits loose.
 const CELL_W = 7
 const CELL_H = 20
 const cells = (px: number, per: number): number => Math.ceil((px / per) * 10) / 10

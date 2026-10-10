@@ -8,8 +8,9 @@ import { cardWidth, CONTROL_SLOT, measure } from './svg-kit'
 // in a reply, and the type follows the app's font size. Nothing is an image, so nothing
 // replays when the row is drawn again.
 
-// Spacing, in the desktop's units: a column is a code-font cell (about 8px), a row a line
-// of body text (about 20px); fractions are taken as they are.
+// Spacing, in the desktop's units: a column is a code-font cell (about 8px, taken high so the
+// pixels a padding is counted at never fall short; rows.tsx's CELL_W takes it low for the
+// inverse sum), a row a line of body text (about 20px); fractions are taken as they are.
 // A cell's padding each side, about 16px.
 export const PAD_X = 2
 // A body cell's padding above and below, about 12px.

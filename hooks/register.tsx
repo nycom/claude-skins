@@ -737,6 +737,9 @@ reply width: ${lastColumns} columns`
   // The band above the prompt: context and plan limits. A survey keeps its place. Another
   // mod's drawing there stays above the band, whatever order the hooks run in, so the band
   // sits last, nearest the prompt. Only the desktop spaces them: a terminal gap is a whole row.
+  // As that row comes and goes, the area above the prompt grows and shrinks by it and the gap;
+  // the band holds still against the prompt only. Holding the area's height would keep room for
+  // a row not drawn, of a height only that mod knows; the engine offers no way, so it is skipped.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const active = await activeSkin($)
     const usage = await read($, usageAtom)
