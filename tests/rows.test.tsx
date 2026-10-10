@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import { widthOf } from '../hooks/markdown'
 import { CONTROL_SLOT, measure, PX_PER_COLUMN } from '../hooks/svg-kit'
 import { codeSvg } from '../hooks/svg-code'
+import { HEAD_PAD_Y, INSET, PAD_X, PAD_Y } from '../hooks/table-card'
 import noir from '../hooks/themes/noir'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
@@ -366,6 +367,14 @@ test('the desktop draws a table as a grid of markdown cells in the skin, not an 
   expect((await ui.findAll({ type: 'Markdown' })).map(found => found.props.text)).toEqual(['dracula', 'uses `#bd93f9` and **bold**', 'x<y', 'ok', 'z', '3'])
   // A right-aligned column keeps its alignment.
   expect(rows[0]?.children?.[1]?.props?.justifyContent).toBe('flex-end')
+  // Every cell breathes: the header at least as tall a pad as the body, the same pad across.
+  expect(PAD_Y).toBeGreaterThan(0)
+  expect(HEAD_PAD_Y).toBeGreaterThanOrEqual(PAD_Y)
+  for (const cell of header?.children ?? []) expect(cell.props).toMatchObject({ paddingX: PAD_X, paddingY: HEAD_PAD_Y })
+  for (const cell of rows.flatMap(row => row.children ?? [])) expect(cell.props).toMatchObject({ paddingX: PAD_X, paddingY: PAD_Y })
+  // The bands sit the same distance from the border on every side, its corners clipping them.
+  expect(card?.props).toMatchObject({ padding: INSET, overflow: 'hidden' })
+  for (const side of ['paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight']) expect(card?.props?.[side]).toBeUndefined()
   await ui.unmount()
 })
 
@@ -834,20 +843,29 @@ const loopingOf = async (ui: { drawn: () => Promise<unknown> }) =>
 // An image's animation delays that are not fixed offsets: negative, or longer than any stagger.
 const timedDelays = (source: string) => [...source.matchAll(/(-?\d+)ms infinite/g)].map(m => Number(m[1])).filter(ms => ms < 0 || ms > 2000)
 
-test('a desktop table card keeps Copy in its top-right corner, level with the header, with no column of its own', async ($, on) => {
+test('a desktop table card keeps Copy inside its header row, after the last header, centred with it', async ($, on) => {
   stubEngine(on)
   const copied: string[] = []
   on('ui.copy', ($, e) => (copied.push(e.text), { value: { isCopied: true } }))
   const ui = await $.ui.mount(desktopReply('span-tb', '| Client | Where |\n| --- | --- |\n| Robot | Pi |'))
   type Node = { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
   const card = ((await ui.find({ type: 'Box' })) as Node).children?.[0]
-  const overlay = card?.children?.at(-1)
+  const header = card?.children?.[0]
+  const last = header?.children?.at(-1)
+  const [label, slot] = last?.children ?? []
 
-  expect(overlay?.props).toMatchObject({ position: 'absolute', top: 0, right: 1 })
-  expect(overlay?.children?.[0]?.type).toBe('Button')
-  expect(overlay?.children?.[0]?.props?.key).toBe('copy-0')
+  // Nothing laid over the card's corner: Copy is in the flow, in its own slot.
+  expect(card?.children?.some(child => child.props?.position === 'absolute')).toBe(false)
   // Two columns in the header row: no phantom third one for the icon.
-  expect(card?.children?.[0]?.children).toHaveLength(2)
+  expect(header?.children).toHaveLength(2)
+  expect(header?.props?.alignItems).toBe('center')
+  expect(last?.props).toMatchObject({ flexDirection: 'row', alignItems: 'center' })
+  // The label takes what the slot leaves; the slot never shrinks under it.
+  expect(label?.props?.flexGrow).toBe(1)
+  expect(label?.children?.[0]?.children?.[0]).toBe('WHERE')
+  expect(slot?.props?.flexShrink).toBe(0)
+  expect(slot?.children?.[0]?.type).toBe('Button')
+  expect(slot?.children?.[0]?.props?.key).toBe('copy-0')
   await ui.press({ key: 'copy-0' })
   expect(copied).toEqual(['| Client | Where |\n| --- | --- |\n| Robot | Pi |'])
   await ui.unmount()

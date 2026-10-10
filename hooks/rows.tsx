@@ -425,7 +425,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
 
         const markdown = tableMarkdown(segment)
 
-        // The desktop card's corner slot fits one glyph, so it keeps the glyph whatever the icon set.
+        // The desktop card's header slot fits one glyph, so it keeps the glyph whatever the icon set.
         return Svg === undefined
           ? tableRows(look, plainTable(segment), maxWidth, copyButton(look, `copy-${i}`, markdown))
           : tableCard(look, segment, maxWidth, copyButton({ ...look, icons: ICONS.unicode }, `copy-${i}`, markdown))

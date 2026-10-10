@@ -8,11 +8,23 @@ import { cardWidth, CONTROL_SLOT, measure } from './svg-kit'
 // in a reply, and the type follows the app's font size. Nothing is an image, so nothing
 // replays when the row is drawn again.
 
+// Spacing, in the desktop's units: a column is a code-font cell (about 8px), a row a line
+// of body text (about 20px); fractions are taken as they are.
+// A cell's padding each side, about 12px.
+export const PAD_X = 1.5
+// A body cell's padding above and below, about 6px.
+export const PAD_Y = 0.3
+// The header's, about 8px.
+export const HEAD_PAD_Y = 0.4
+// Between the border and the bands on every side: none, so the bands span the card and its
+// rounded corners clip them.
+export const INSET = 0
+
 const SIZE = 15
 // Bold capitals run about a size wider than the body's text.
 const HEAD_SIZE = SIZE + 1
-// A cell's padding, both sides, in pixels: `paddingX={1}` is about a code-font cell each.
-const CELL_PAD = 16
+// A cell's padding, both sides, in pixels.
+const CELL_PAD = Math.ceil(2 * PAD_X * 8)
 const MIN_COL = 56
 
 export const JUSTIFY = { left: 'flex-start', right: 'flex-end', center: 'center' } as const
@@ -38,7 +50,7 @@ const cellWidth = (cell: string, isWord: boolean): number =>
 const headOf = (cell: string): string => plainCell(cell.replace(LINK, '$1')).toUpperCase()
 
 // Per column, its widest cell or header, or with `isWord` its widest word, padding
-// included; the last column keeps `reserve` more beside its header, the corner Copy sits in.
+// included; the last column keeps `reserve` more beside its header, the slot Copy sits in.
 function columnWidthsOf(table: Table, isWord: boolean, reserve: number): number[] {
   return table.header.map((header, col) => {
     const head = headOf(header)
@@ -111,45 +123,50 @@ function sharesOf(widths: readonly number[]): number[] {
 
 // The card spans the reply; its columns take shares of it, sized in pixels for the room
 // the reply gives a card, so a column keeps its longest word whole whatever the unit.
-// `control`, the Copy button, sits in the top-right corner, level with the header.
+// `control`, the Copy button, ends the header row, in a slot of its own after the last header.
 export function tableCard(look: Look, table: Table, columns: number, control?: ReturnType<Ui['Button']>) {
   const { Box, Markdown, Text } = look.ui
   const { palette } = look.skin
   const reserve = control === undefined ? 0 : CONTROL_SLOT
   const shares = sharesOf(fitColumns(columnWidthsOf(table, false, reserve), cardWidth(columns), columnWidthsOf(table, true, reserve)))
-  const row = (cells: readonly ReturnType<Ui['Text']>[], band: string | undefined) => (
-    <Box flexDirection="row" {...(band === undefined ? {} : { backgroundColor: band })}>
-      {cells.map((cell, i) => (
-        <Box width={`${shares[i] ?? 0}%`} paddingX={1} justifyContent={JUSTIFY[table.align[i] ?? 'left']}>
-          {cell}
+  const cellBox = (i: number, padY: number) => ({ width: `${shares[i] ?? 0}%`, paddingX: PAD_X, paddingY: padY })
+  const last = table.header.length - 1
+  const head = (cell: string, i: number) => {
+    const label = (
+      <Text color={palette.muted} bold>
+        {headOf(cell)}
+      </Text>
+    )
+    const justify = JUSTIFY[table.align[i] ?? 'left']
+
+    return control !== undefined && i === last ? (
+      <Box {...cellBox(i, HEAD_PAD_Y)} flexDirection="row" alignItems="center" columnGap={1}>
+        <Box flexGrow={1} justifyContent={justify}>
+          {label}
         </Box>
-      ))}
-    </Box>
-  )
+        <Box flexShrink={0}>{control}</Box>
+      </Box>
+    ) : (
+      <Box {...cellBox(i, HEAD_PAD_Y)} justifyContent={justify}>
+        {label}
+      </Box>
+    )
+  }
 
   return (
-    <Box flexDirection="column" marginY={1} width="100%" borderStyle="round" borderColor={palette.muted}>
-      {row(
-        table.header.map(cell => (
-          <Text color={palette.muted} bold>
-            {headOf(cell)}
-          </Text>
-        )),
-        palette.surface,
-      )}
-      {table.rows.map((cells, r) =>
-        row(
-          table.header.map((_, i) => <Markdown text={cells[i] ?? ''} />),
-          r % 2 === 1 ? palette.zebra : undefined,
-        ),
-      )}
-      {control === undefined ? (
-        ''
-      ) : (
-        <Box position="absolute" top={0} right={1}>
-          {control}
+    <Box flexDirection="column" marginY={1} width="100%" borderStyle="round" borderColor={palette.muted} padding={INSET} overflow="hidden">
+      <Box flexDirection="row" alignItems="center" backgroundColor={palette.surface}>
+        {table.header.map(head)}
+      </Box>
+      {table.rows.map((cells, r) => (
+        <Box flexDirection="row" {...(r % 2 === 1 ? { backgroundColor: palette.zebra } : {})}>
+          {table.header.map((_, i) => (
+            <Box {...cellBox(i, PAD_Y)} justifyContent={JUSTIFY[table.align[i] ?? 'left']}>
+              <Markdown text={cells[i] ?? ''} />
+            </Box>
+          ))}
         </Box>
-      )}
+      ))}
     </Box>
   )
 }
