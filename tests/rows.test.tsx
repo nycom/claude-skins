@@ -3,9 +3,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
-import { CONTROL_SLOT, PX_PER_COLUMN } from '../hooks/svg-kit'
+import { CONTROL_SLOT, measure, PX_PER_COLUMN } from '../hooks/svg-kit'
 import { codeSvg } from '../hooks/svg-code'
-import { measure } from '../hooks/svg-table'
+import noir from '../hooks/themes/noir'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -346,27 +346,27 @@ test('a table wider than its share spans the column instead of running off it', 
   }
 })
 
-test('the desktop draws a table as an animated vector card, with a tooltip on a cut cell', async ($, on) => {
+test('the desktop draws a table as a grid of markdown cells in the skin, not an image', async ($, on) => {
   stubEngine(on)
+  const { palette } = noir
+  const text = '| Skin | Note |\n|---|--:|\n| dracula | uses `#bd93f9` and **bold** |\n| x<y | ok |\n| z | 3 |'
+  const ui = await $.ui.mount(desktopReply('grid-tb', text))
+  type Node = { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
+  const card = ((await ui.find({ type: 'Box' })) as Node).children?.[0]
+  const [header, ...rows] = (card?.children ?? []).filter(child => child.type === 'Box' && child.props?.position !== 'absolute')
 
-  const text = `| Skin | Accent | Note |
-|---|---|---|
-| dracula | #bd93f9 | ${'a very long note '.repeat(30)} |
-| x<y | +18 −3 | ok |`
-  const ui = await $.ui.mount({
-    ...SITE,
-    surface: 'desktop',
-    component: 'AssistantMessage',
-    requestId: 'r3',
-    props: { text, isFirstOfReply: true },
-  })
-  const svg = (await ui.find({ type: 'Svg' })) as { props: { source: string; isInteractive?: boolean; alt: string } } | undefined
-
-  expect(svg?.props.isInteractive).toBeUndefined()
-  expect(svg?.props.source).toContain('class="row"')
-  expect(svg?.props.source).toContain('<circle')
-  expect(svg?.props.source).toContain('x&lt;y')
-  expect(svg?.props.alt).toContain('Skin | Accent | Note')
+  expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+  expect(card?.props).toMatchObject({ borderStyle: 'round', borderColor: palette.muted, width: '100%' })
+  // The header's own band, then zebra rows from the skin's palette.
+  expect(header?.props?.backgroundColor).toBe(palette.surface)
+  expect(rows.map(row => row.props?.backgroundColor)).toEqual([undefined, palette.zebra, undefined])
+  const heads = (await ui.findAll({ type: 'Text' })).filter(found => found.props.bold === true)
+  expect(heads.map(found => [found.text, found.props.color])).toEqual([['SKIN', palette.muted], ['NOTE', palette.muted]])
+  // Every body cell is the surface's own markdown, inline code and bold as written.
+  expect((await ui.findAll({ type: 'Markdown' })).map(found => found.props.text)).toEqual(['dracula', 'uses `#bd93f9` and **bold**', 'x<y', 'ok', 'z', '3'])
+  // A right-aligned column keeps its alignment.
+  expect(rows[0]?.children?.[1]?.props?.justifyContent).toBe('flex-end')
+  await ui.unmount()
 })
 
 test('on the desktop an edit is a diff card and a shell command a terminal card', async ($, on) => {
@@ -763,78 +763,22 @@ test('a card animates on its first draw only: a redraw of the same row holds sti
   const held = '*{animation:none!important}</style>'
 
   const shell = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'ToolResult', requestId: 'once-sh', props: { tool_use_id: 'once-sh', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false } })
-  const table = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'once-tb', props: { text: '| A | B |\n| --- | --- |\n| 1 | 2 |' } as never })
+  const code = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'once-tb', props: { text: '```ts\nconst a = 1\n```' } as never })
   expect(await sourceOf(shell)).not.toContain(held)
-  expect(await sourceOf(table)).not.toContain(held)
+  expect(await sourceOf(code)).not.toContain(held)
 
   // Any write the cards read (here a theme switch) draws them again: the rows must not rise in a second time.
   await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { kind: 'engine' }, origin: { kind: 'composer' } } as never)
   expect(await sourceOf(shell)).toContain(held)
-  expect(await sourceOf(table)).toContain(held)
+  expect(await sourceOf(code)).toContain(held)
   await shell.unmount()
-  await table.unmount()
+  await code.unmount()
 })
 
-test('a table that grows while its reply streams: only the rows new since the last draw rise in', async ($, on) => {
-  stubEngine(on)
-  const draw = async (rows: string[]) => {
-    const ui = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'grow-tb', props: { text: ['| A | B |', '| --- | --- |', ...rows].join('\n') } as never })
-    const source = ((await ui.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
-    await ui.unmount()
-    return source
-  }
-  // Each row's group, in order, with the text of its cells.
-  const rowsOf = (source: string) => [...source.matchAll(/<g class="(row[^"]*)" style="animation-delay:(\d+)ms">(.*?)<\/g><\/g>/g)].map(([, cls, delay, body]) => ({ cls, delay, text: [...(body ?? '').matchAll(/>([^<]+)<\/text>/g)].map(m => m[1]).join(' ') }))
-  const all = ['| 1 | 2 |', '| 3 | four |', '| 5 | 6 |', '| 7 | 8 |']
-
-  // The last row is still streaming: drawn half-written, then finished on the next draw.
-  expect(await draw(['| 1 | 2 |', '| 3 | fo'])).not.toContain('*{animation:none!important}</style>')
-
-  const grown = await draw(all)
-  const rows = rowsOf(grown)
-  expect(rows.map(row => [row.cls, row.text])).toEqual([['row', '1 2'], ['row', '3 four'], ['row fresh', '5 6'], ['row fresh', '7 8']])
-  // The new rows start their stagger at once; everything but them, header and rule included, holds still.
-  expect(rows[2]?.delay).toBe('120')
-  expect(grown).toContain(':not(.fresh){animation:none!important}')
-  expect(grown).not.toContain('*{animation:none!important}</style>')
-
-  const again = await draw(all)
-  expect(again).toContain('*{animation:none!important}</style>')
-  expect(again).not.toContain('fresh')
-})
-
-test('a reply whose table gives its place to text on a redraw still draws', async ($, on) => {
-  stubEngine(on)
-  const reply = (text: string) => ({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'swap-tb', props: { text } as never }) as const
-  const table = '| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |'
-
-  await (await $.ui.mount(reply(table))).unmount()
-  const swapped = await $.ui.mount(reply(`Intro\n\n${table}`))
-  expect(await swapped.find({ type: 'Svg' })).toBeDefined()
-  await swapped.unmount()
-})
-
-test('a table that moves to another segment keeps its rows held; only the new row rises in', async ($, on) => {
-  stubEngine(on)
-  const reply = (text: string) => ({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'shift-tb', props: { text } as never }) as const
-  const table = (rows: string[]) => ['| A | B |', '| --- | --- |', ...rows].join('\n')
-  const draw = async (text: string) => {
-    const ui = await $.ui.mount(reply(text))
-    const source = ((await ui.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
-    await ui.unmount()
-    return [...source.matchAll(/<g class="(row[^"]*)" style="animation-delay:\d+ms">(.*?)<\/g><\/g>/g)].map(([, cls, body]) => [cls, [...(body ?? '').matchAll(/>([^<]+)<\/text>/g)].map(m => m[1]).join(' ')])
-  }
-
-  // A closed code block sits before the table, then goes: the table moves from segment 2 to segment 1.
-  await draw(`Intro\n\n\`\`\`js\nx\n\`\`\`\n\n${table(['| 1 | 2 |', '| 3 | 4 |'])}`)
-  const grown = await draw(`Intro\n\n${table(['| 1 | 2 |', '| 3 | 4 |', '| 5 | 6 |'])}`)
-  expect(grown.filter(([cls]) => cls === 'row fresh')).toEqual([['row fresh', '5 6']])
-})
-
-test('the terminal drawing a reply first does not hold the desktop’s first draw still', async ($, on) => {
+test('the terminal drawing a reply first does not hold the desktop’s first card still', async ($, on) => {
   stubEngine(on)
   const reply = (surface: (typeof SURFACES)[number]) =>
-    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'both-tb', props: { text: '| A | B |\n| --- | --- |\n| 1 | 2 |' } as never }) as const
+    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'both-tb', props: { text: '```ts\nconst a = 1\n```' } as never }) as const
 
   await (await $.ui.mount(reply('terminal'))).unmount()
   const desktop = await $.ui.mount(reply('desktop'))
@@ -852,7 +796,7 @@ test('each surface remembers its own card draws: desktop, mobile, desktop animat
   const shell = (surface: 'desktop' | 'mobile') =>
     ({ ...SITE, surface, component: 'ToolResult', requestId: 'surf-sh', props: { tool_use_id: 'surf-sh', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false } }) as const
   const table = (surface: 'desktop' | 'mobile') =>
-    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'surf-tb', props: { text: '| A | B |\n| --- | --- |\n| 1 | 2 |' } as never }) as const
+    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'surf-tb', props: { text: '```ts\nconst a = 1\n```' } as never }) as const
 
   for (const make of [shell, table]) {
     const states: boolean[] = []
@@ -890,31 +834,20 @@ const loopingOf = async (ui: { drawn: () => Promise<unknown> }) =>
 // An image's animation delays that are not fixed offsets: negative, or longer than any stagger.
 const timedDelays = (source: string) => [...source.matchAll(/(-?\d+)ms infinite/g)].map(m => Number(m[1])).filter(ms => ms < 0 || ms > 2000)
 
-const drawnText = (source: string) => [...source.matchAll(/>([^<>]+)</g)].map(m => m[1]).join(' ')
-
-test('a desktop table card keeps Copy in its top-right corner, over the header row, with no column of its own', async ($, on) => {
+test('a desktop table card keeps Copy in its top-right corner, level with the header, with no column of its own', async ($, on) => {
   stubEngine(on)
   const copied: string[] = []
   on('ui.copy', ($, e) => (copied.push(e.text), { value: { isCopied: true } }))
   const ui = await $.ui.mount(desktopReply('span-tb', '| Client | Where |\n| --- | --- |\n| Robot | Pi |'))
-  const { source, width } = await svgOf(ui)
   type Node = { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
-  const reply = (await ui.find({ type: 'Box' })) as Node
-  const card = reply.children?.[0]?.children?.[0]
-  const overlay = card?.children?.[1]
+  const card = ((await ui.find({ type: 'Box' })) as Node).children?.[0]
+  const overlay = card?.children?.at(-1)
 
-  // Laid over the card itself, one row down: level with the header.
-  expect(card?.children?.[0]?.type).toBe('Svg')
-  expect(card?.props?.alignSelf).toBe('flex-start')
-  expect(overlay?.props).toMatchObject({ position: 'absolute', top: 1, right: 3 })
+  expect(overlay?.props).toMatchObject({ position: 'absolute', top: 0, right: 1 })
   expect(overlay?.children?.[0]?.type).toBe('Button')
-  // The header's rule runs the card's width less its padding and the icon's slot only.
-  expect(CONTROL_SLOT).toBeLessThanOrEqual(48)
-  expect(source).toContain(`class="rule" x1="24" y1="57" x2="${width - 24 - CONTROL_SLOT}"`)
-  // Two columns, the last header clear of the icon: no phantom third column.
-  const heads = [...source.matchAll(/<text x="([\d.]+)"[^>]*class="head">([^<]+)</g)].map(m => [Number(m[1]), m[2]] as const)
-  expect(heads.map(([, text]) => text)).toEqual(['CLIENT', 'WHERE'])
-  expect(heads.every(([x, text]) => x + measure(text ?? '', false, 14) <= width - 24 - CONTROL_SLOT)).toBe(true)
+  expect(overlay?.children?.[0]?.props?.key).toBe('copy-0')
+  // Two columns in the header row: no phantom third one for the icon.
+  expect(card?.children?.[0]?.children).toHaveLength(2)
   await ui.press({ key: 'copy-0' })
   expect(copied).toEqual(['| Client | Where |\n| --- | --- |\n| Robot | Pi |'])
   await ui.unmount()
@@ -943,36 +876,56 @@ test('a desktop table card copies with a dim one-glyph icon, ascii icons too: it
   expect(await buttonOf('icon-tb-ascii')).toMatchObject({ label: '⧉' })
 })
 
-test('a desktop table card draws long headers and cells in full, wrapping instead of cutting', async ($, on) => {
+test('a desktop table card draws long headers and cells in full, and a column never narrower than its longest word', async ($, on) => {
   stubEngine(on)
-  const long = 'Yes, systemd brings it back (its README says so, and the unit restarts it on failure with a five second backoff, which held when the process was killed twice and came back each time without help)'
-  const text = `| Client | Where | Survives a restart |\n| --- | --- | --- |\n| Robot | the Pi under /home/user | ${long} |\n| WEB | Cloud Run | ${long} ${long} |\n| Server | NAS | no |`
-  const ui = await $.ui.mount(desktopReply('full-tb', text))
-  const { source } = await svgOf(ui)
-  const words = drawnText(source).split(/\s+/)
+  const long = 'the unit restarts it on failure with a five second backoff, which held when the process was killed twice'
+  const ui = await $.ui.mount(desktopReply('full-tb', `| Directory marketplaces | What | Why |\n| --- | --- | --- |\n| Directory marketplaces | ${long} | ${long} ${long} |`))
+  type Node = { props?: { width?: unknown }; children?: readonly Node[] }
+  const header = ((await ui.find({ type: 'Box' })) as Node).children?.[0]?.children?.[0]
+  const shares = (header?.children ?? []).map(cell => Number.parseFloat(String(cell.props?.width)))
+  // The card spans the room the reply gives it; the first column holds its longest word whole.
+  const room = 100 * PX_PER_COLUMN
 
-  expect(source).not.toContain('…')
-  for (const word of ['CLIENT', 'WHERE', 'SURVIVES', 'A', 'RESTART', ...long.split(' ')]) {
-    expect(words).toContain(word)
-  }
+  expect(await ui.find({ type: 'Text', text: 'DIRECTORY MARKETPLACES' })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: `${long} ${long}` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /…/ })).toBeUndefined()
+  expect(Math.round(shares.reduce((sum, share) => sum + share, 0))).toBe(100)
+  expect(((shares[0] ?? 0) / 100) * room).toBeGreaterThanOrEqual(measure('MARKETPLACES', false, 14))
+  expect(((shares[0] ?? 0) / 100) * room).toBeGreaterThanOrEqual(measure('marketplaces', false, 15))
   await ui.unmount()
 })
 
-test('a link in a desktop table cell is drawn as its text and pressable as a link', async ($, on) => {
+test('a link in a desktop table cell is the surface’s own link, inline in its cell, with no row of links under the card', async ($, on) => {
   stubEngine(on)
   const ui = await $.ui.mount(desktopReply('link-tb', '| Client | Docs |\n| --- | --- |\n| Robot | see [README](https://github.com/nycom/orion#readme) first |'))
-  const { source } = await svgOf(ui)
-  const link = (await ui.find({ type: 'Link' })) as { props: { href: string; label?: string } } | undefined
 
-  expect(link?.props).toEqual({ href: 'https://github.com/nycom/orion#readme', label: 'README' })
-  expect(source).not.toContain('](')
-  expect(source).toContain('class="link">README</tspan>')
+  expect((await ui.findAll({ type: 'Markdown' })).map(found => found.props.text)).toContain('see [README](https://github.com/nycom/orion#readme) first')
+  expect(await ui.find({ type: 'Link' })).toBeUndefined()
+  expect(await ui.find({ type: 'Svg' })).toBeUndefined()
   await ui.unmount()
 })
 
-test('a table scrolled back into view does not rise in again, whatever request draws it', async ($, on) => {
+test('a desktop table is drawn once: it sets no settle timer and never holds a redraw', async ($, on) => {
   const clock = stubEngine(on)
-  const text = '| Client | Where |\n| --- | --- |\n| Robot | Pi |\n| Server | NAS |'
+  // A settle is a write to `settled` once the card has risen, which draws the reply again.
+  const settles: unknown[] = []
+  on('state.set', ($, e, next) => (e.key === 'settled' && settles.push(e.id), next(e)))
+
+  const table = await $.ui.mount(desktopReply('quiet-tb', '| Client | Where |\n| --- | --- |\n| Robot | Pi |'))
+  await clock.advance(1500)
+  expect(settles).toEqual([])
+  await table.unmount()
+
+  // A code card in the same place still settles.
+  const code = await $.ui.mount(desktopReply('quiet-cd', '```ts\nconst a = 1\n```'))
+  await clock.advance(1500)
+  expect(settles).toHaveLength(1)
+  await code.unmount()
+})
+
+test('a code card scrolled back into view does not rise in again, whatever request draws it', async ($, on) => {
+  const clock = stubEngine(on)
+  const text = '```ts\nconst a = 1\n```'
   const held = '*{animation:none!important}</style>'
 
   // The engine keeps a drawing's answer and replays it when the row mounts again: once its
@@ -983,7 +936,7 @@ test('a table scrolled back into view does not rise in again, whatever request d
   expect((await svgOf(first)).source).toContain(held)
   await first.unmount()
 
-  // A mount under a new request id draws the same table, already seen, still.
+  // A mount under a new request id draws the same card, already seen, still.
   const again = await $.ui.mount(desktopReply('scroll-b', text))
   expect((await svgOf(again)).source).toContain(held)
   await again.unmount()
