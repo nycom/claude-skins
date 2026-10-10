@@ -124,29 +124,6 @@ export const isLooping = (source: string): boolean => !isStill && !isRedraw && s
 // plays no times, so it draws as unanimated, while a one-shot (a ring's growth) still plays.
 export const held = (source: string): string => source.replaceAll(' infinite', ' 0')
 
-// A looping drawing's source, built once per input and the same string from then on, so a
-// loop's Client gets the same props on a redraw and the desktop does not draw it again (an
-// Svg drawn bare is a new image on every redraw whatever its source). Held still or redrawn,
-// a source differs (see `still`), so those are part of the key.
-// ponytail: cleared whole when full; readings, skins and kinds keep it to a few dozen.
-const loops = new Map<string, string>()
-
-export function loopSource(key: string, draw: () => string): string {
-  const full = `${isStill}:${isRedraw}:${key}`
-  let source = loops.get(full)
-
-  if (source === undefined) {
-    if (loops.size >= 256) {
-      loops.clear()
-    }
-
-    source = draw()
-    loops.set(full, source)
-  }
-
-  return source
-}
-
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
   `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
 

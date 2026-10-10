@@ -4,7 +4,7 @@ import type { ClientModule, RenderElement } from 'claude-code'
 // redraw, which starts its loop over; a Client under one key is kept across redraws and draws
 // again only on new props, so the image it holds runs on. The element table a module draws
 // with names no Svg, but the desktop draws one a module returns.
-export type LoopProps = { source: string; alt: string; width: number; height: number; isInteractive?: boolean }
+export type LoopProps = { source: string; alt: string; width: number; height: number }
 
 const Loop: ClientModule<LoopProps> = props => h('Svg', props) as RenderElement
 

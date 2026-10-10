@@ -2,7 +2,7 @@ import type { UsageSnap } from '../types'
 import { compactCount, resetLabel } from './format'
 import { channels } from './light'
 import type { Palette, Slot } from './skin'
-import { escape, FONT, loopSource, measure, still } from './svg-kit'
+import { escape, FONT, measure, still } from './svg-kit'
 
 // The band above the prompt: how full the context window is and how much of each plan
 // limit is spent, as rings that fill in when they draw, and what fills the context, as a bar.
@@ -192,43 +192,40 @@ const image = (width: number, style: string, body: string): string =>
 function ringSvg(isContext: boolean, percent: number, start: number, palette: Palette): string {
   const jog = (isContext ? JOG_TIERS : PLAN_TIERS).find(tier => percent >= tier.from)
   const color = jog === undefined ? meterColor(percent, palette) : palette[jog.slot]
+  const filled = (CIRCUMFERENCE * percent) / 100
+  const from = (CIRCUMFERENCE * start) / 100
+  const isDim = jog !== undefined && isContext && percent >= JOG_DIM
+  // The fill grows from where it was to where it is; not at all when it did not move.
+  const moves = [...(from === filled ? [] : ['fill .9s cubic-bezier(.2,.8,.2,1)']), ...(isDim ? [`dim ${jog.seconds}s ease-in-out infinite`] : [])]
+  const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
+  const style: string[] = from === filled ? [] : [`@keyframes fill{from{stroke-dasharray:${from} ${CIRCUMFERENCE}}}`]
 
-  return loopSource(`ring:${isContext}:${percent}:${start}:${color}:${palette.muted}`, () => {
-    const filled = (CIRCUMFERENCE * percent) / 100
-    const from = (CIRCUMFERENCE * start) / 100
-    const isDim = jog !== undefined && isContext && percent >= JOG_DIM
-    // The fill grows from where it was to where it is; not at all when it did not move.
-    const moves = [...(from === filled ? [] : ['fill .9s cubic-bezier(.2,.8,.2,1)']), ...(isDim ? [`dim ${jog.seconds}s ease-in-out infinite`] : [])]
-    const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
-    const style: string[] = from === filled ? [] : [`@keyframes fill{from{stroke-dasharray:${from} ${CIRCUMFERENCE}}}`]
+  // A jog ring, masked to twelve segments by an 8° gap centred on every hour. Its arc ends
+  // square: a round cap would poke past a gap into the next segment.
+  const ring = [
+    `<mask id="jog" maskUnits="userSpaceOnUse" x="0" y="${CY - 12}" width="24" height="24"><circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(SEGMENT * 22) / 30} ${(SEGMENT * 8) / 30}" transform="rotate(-86 ${RX} ${CY})"/></mask><g mask="url(#jog)">`,
+    `<circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
+    `<circle class="fill" cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${filled} ${CIRCUMFERENCE}" transform="rotate(-90 ${RX} ${CY})"${grow}/>`,
+  ]
 
-    // A jog ring, masked to twelve segments by an 8° gap centred on every hour. Its arc ends
-    // square: a round cap would poke past a gap into the next segment.
-    const ring = [
-      `<mask id="jog" maskUnits="userSpaceOnUse" x="0" y="${CY - 12}" width="24" height="24"><circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(SEGMENT * 22) / 30} ${(SEGMENT * 8) / 30}" transform="rotate(-86 ${RX} ${CY})"/></mask><g mask="url(#jog)">`,
-      `<circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
-      `<circle class="fill" cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${filled} ${CIRCUMFERENCE}" transform="rotate(-90 ${RX} ${CY})"${grow}/>`,
-    ]
+  if (jog !== undefined) {
+    // A segment is unlit while the arc covers less than half of it; the last one always counts.
+    const first = Math.min(SEGMENTS - 1, Math.round((percent * SEGMENTS) / 100))
+    const count = SEGMENTS - first
+    // Each lights a tenth of a cycle after the one before, closer when that would run past the cycle.
+    const step = Math.min(jog.seconds / 10, (jog.seconds * 0.55) / Math.max(1, count - 1))
+    style.push(`@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, isDim ? '@keyframes dim{50%{opacity:.6}}' : '')
+    // Held still, only the next segment up shows, at .4.
+    ring.push(
+      ...Array.from({ length: count }, (_, n) =>
+        `<circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${SEGMENT} ${CIRCUMFERENCE}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${RX} ${CY})" style="animation:jog ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
+      ),
+    )
+  }
 
-    if (jog !== undefined) {
-      // A segment is unlit while the arc covers less than half of it; the last one always counts.
-      const first = Math.min(SEGMENTS - 1, Math.round((percent * SEGMENTS) / 100))
-      const count = SEGMENTS - first
-      // Each lights a tenth of a cycle after the one before, closer when that would run past the cycle.
-      const step = Math.min(jog.seconds / 10, (jog.seconds * 0.55) / Math.max(1, count - 1))
-      style.push(`@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, isDim ? '@keyframes dim{50%{opacity:.6}}' : '')
-      // Held still, only the next segment up shows, at .4.
-      ring.push(
-        ...Array.from({ length: count }, (_, n) =>
-          `<circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${SEGMENT} ${CIRCUMFERENCE}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${RX} ${CY})" style="animation:jog ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
-        ),
-      )
-    }
+  ring.push('</g>')
 
-    ring.push('</g>')
-
-    return image(RING_W, [...style, still()].join(''), ring.join(''))
-  })
+  return image(RING_W, [...style, still()].join(''), ring.join(''))
 }
 
 // A ring's reading and note, after its ring, with the room before the next ring.

@@ -354,17 +354,27 @@ async function commit($: EngineInterface, state: DesignState): Promise<void> {
 // ever hosts several at once.
 let running: readonly string[] = []
 
-// Which calls' icons move changes only as a call starts or ends, never on a redraw.
-async function setRunning($: EngineInterface, next: readonly string[]): Promise<void> {
-  const was = new Set(running.slice(-TOOL_LOOPS))
-  running = next
-  const now = new Set(running.slice(-TOOL_LOOPS))
+// Which calls' icons move changes only as a call starts or ends, never on a redraw. Changes
+// apply one at a time, in order, so a late write never lands over a newer one; a failed write
+// is dropped, as a call's result must not hang on its icon.
+let runningWrites: Promise<void> = Promise.resolve()
 
-  for (const id of new Set([...was, ...now])) {
-    if (was.has(id) !== now.has(id)) await update($, memberOf(loopAtom, { requestId: id }), () => now.has(id))
-  }
+function setRunning($: EngineInterface, change: (ids: readonly string[]) => readonly string[]): Promise<void> {
+  runningWrites = runningWrites
+    .then(async () => {
+      const was = new Set(running.slice(-TOOL_LOOPS))
+      running = change(running)
+      const now = new Set(running.slice(-TOOL_LOOPS))
 
-  if (was.size !== now.size) await update($, toolLoopsAtom, () => now.size)
+      for (const id of new Set([...was, ...now])) {
+        if (was.has(id) !== now.has(id)) await update($, memberOf(loopAtom, { requestId: id }), () => now.has(id))
+      }
+
+      if (was.size !== now.size) await update($, toolLoopsAtom, () => now.size)
+    })
+    .catch(() => {})
+
+  return runningWrites
 }
 
 async function designState($: EngineInterface): Promise<DesignState> {
@@ -397,8 +407,7 @@ export const register: Register = on => {
     await refreshUsage($)
     await readConfig($, config)
     stopRelabel()
-    await setRunning($, [])
-    await update($, toolLoopsAtom, () => 0)
+    await setRunning($, () => [])
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -480,8 +489,8 @@ export const register: Register = on => {
     const startedAt = await $.clock.now()
     // A subagent's calls have no row on the main transcript, so they take no loop.
     const isMain = e.agentId === undefined
-    if (isMain) await setRunning($, [...running, e.tool_use_id])
-    const ran = await next(e).finally(() => (isMain ? setRunning($, running.filter(id => id !== e.tool_use_id)) : undefined))
+    if (isMain) await setRunning($, ids => [...ids, e.tool_use_id])
+    const ran = await next(e).finally(() => (isMain ? setRunning($, ids => ids.filter(id => id !== e.tool_use_id)) : undefined))
     const ms = (await $.clock.now()) - startedAt
 
     await update($, memberOf(durationAtom, { requestId: e.tool_use_id }), () => ms)
@@ -635,9 +644,8 @@ reply width: ${lastColumns} columns`
 
     const ids = e.props.calls.flatMap(call => (call.tool_use_id === undefined ? [] : [call.tool_use_id]))
     const moves = await Promise.all(ids.map(id => read($, memberOf(loopAtom, { requestId: id }))))
-    const moving = ids.find((_, i) => moves[i])
-
-    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls, moving === undefined ? undefined : `loop-${moving}`)
+    // Keyed by the group's first call, so the Client stays while any of its calls moves.
+    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls, moves.includes(true) ? `loop-${ids[0]}` : undefined)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {

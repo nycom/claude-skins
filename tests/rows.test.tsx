@@ -6,7 +6,6 @@ import { widthOf } from '../hooks/markdown'
 import { CONTROL_SLOT, PX_PER_COLUMN } from '../hooks/svg-kit'
 import { codeSvg } from '../hooks/svg-code'
 import { measure } from '../hooks/svg-table'
-import { ICONS } from '../hooks/skin'
 import tokyoNight from '../hooks/themes/tokyo-night'
 
 const SURFACES = ['terminal', 'desktop'] as const
@@ -929,15 +928,20 @@ test('code cards keep only an icon-sized corner free for Copy', async () => {
   expect(card.source).toContain(`<text x="${600 - 16 - CONTROL_SLOT}"`)
 })
 
-test('a desktop table card copies with a dim one-glyph icon, ascii in ascii mode', async ($, on) => {
+test('a desktop table card copies with a dim one-glyph icon, ascii icons too: its slot fits one glyph', async ($, on) => {
   stubEngine(on)
   on('ui.copy', () => ({ value: { isCopied: true } }))
-  const ui = await $.ui.mount(desktopReply('icon-tb', '| A | B |\n| --- | --- |\n| 1 | 2 |'))
-  const button = (await ui.find({ type: 'Button' })) as { props: { label: string; plain?: boolean; dimColor?: boolean } }
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  const buttonOf = async (requestId: string) => {
+    const ui = await $.ui.mount(desktopReply(requestId, '| A | B |\n| --- | --- |\n| 1 | 2 |'))
+    const button = (await ui.find({ type: 'Button' })) as unknown as { props: { label: string; plain?: boolean; dimColor?: boolean } }
+    await ui.unmount()
+    return button.props
+  }
 
-  expect(button.props).toMatchObject({ label: '⧉', plain: true, dimColor: true })
-  expect(ICONS.ascii.copy).toBe('[copy]')
-  await ui.unmount()
+  expect(await buttonOf('icon-tb')).toMatchObject({ label: '⧉', plain: true, dimColor: true })
+  await runSkin($, 'icons ascii')
+  expect(await buttonOf('icon-tb-ascii')).toMatchObject({ label: '⧉' })
 })
 
 test('a desktop table card draws long headers and cells in full, wrapping instead of cutting', async ($, on) => {
@@ -1671,14 +1675,14 @@ test('desktop loops are Clients under a stable key at their drawing\u2019s size,
   for (const [found, key] of [
     [row, 'loop-run-1'],
     [spinner, 'loop-spinner'],
-    [band, 'loop-context'],
+    [band, 'loop-ring-0'],
   ] as const) {
     expect(found.clients.map(keyOf)).toEqual([key])
     const [client] = found.clients
     expect(client?.props.module).toBe('hooks/anim.tsx')
-    // No size of its own: the region is as large as the image the module draws.
-    expect(client?.props.width).toBeUndefined()
-    expect(client?.props.height).toBeUndefined()
+    // A fixed size, so the region never resizes and the desktop never draws it again for that.
+    expect(client?.props.width).toBeGreaterThan(0)
+    expect(client?.props.height).toBeGreaterThan(0)
     // The module draws the looping image itself.
     expect(found.drawn[0]).toMatchObject({ type: 'Svg', props: { source: client?.props.props?.source } })
     expect(client?.props.props?.source).toContain(' infinite')
@@ -1727,7 +1731,57 @@ test('at most three loops move at once: the spinner and the newest running rows,
   expect(after.rows.slice(0, 4).map(row => row.clients.map(keyOf))).toEqual([[], [], ['loop-r3'], ['loop-r4']])
   // With every call done and the turn over, the band's ring moves again.
   for (const id of ids) await calls.finish(id)
-  expect((await clientsDrawn($, BAND('desktop', false))).clients.map(keyOf)).toEqual(['loop-context'])
+  expect((await clientsDrawn($, BAND('desktop', false))).clients.map(keyOf)).toEqual(['loop-ring-0'])
+})
+
+test('calls started together still move at most the two newest rows', async ($, on) => {
+  const { calls } = await liveDesktop($, on)
+  const ids = ['p1', 'p2', 'p3', 'p4', 'p5']
+  await calls.start('p1')
+  await calls.start('p2')
+  await Promise.all(ids.slice(2).map(id => calls.start(id)))
+
+  const rows = await Promise.all(ids.map(id => clientsDrawn($, runningRow(id))))
+  expect(rows.map(row => row.clients.map(keyOf))).toEqual([[], [], [], ['loop-p4'], ['loop-p5']])
+})
+
+test('two 7-day rings that both move take a key each', async ($, on) => {
+  on('session.usage', () => ({
+    value: {
+      startedAt: 0,
+      context: { window: 200000 },
+      rateLimits: [
+        { kind: 'seven_day', percentUsed: 85 },
+        { kind: 'seven_day_opus', percentUsed: 88 },
+      ],
+    },
+  }))
+  await liveDesktop($, on, false, true)
+
+  const keys = (await clientsDrawn($, BAND('desktop', false))).clients.map(keyOf)
+  expect(keys.length).toBe(2)
+  expect(new Set(keys).size).toBe(2)
+})
+
+test('a folded group keeps its Client while any of its calls runs', async ($, on) => {
+  const { calls } = await liveDesktop($, on)
+  await calls.start('g1')
+  await calls.start('g2')
+  const group = {
+    ...SITE,
+    surface: 'desktop',
+    component: 'ToolGroup',
+    requestId: 'g-keep',
+    props: {
+      calls: [call('Bash', { command: 'sleep 9' }, { tool_use_id: 'g1', isRunning: true }), call('Bash', { command: 'sleep 9' }, { tool_use_id: 'g2', isRunning: true })],
+      isActive: true,
+      isExpanded: false,
+    },
+  } as const
+
+  const before = (await clientsDrawn($, group)).clients.map(keyOf)
+  await calls.finish('g1')
+  expect((await clientsDrawn($, group)).clients.map(keyOf)).toEqual(before)
 })
 
 test('Reduce motion draws no loop: no Client, every image held', async ($, on) => {

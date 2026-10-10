@@ -1,10 +1,10 @@
 import type { Kind } from './skin'
-import { loopSource, still } from './svg-kit'
+import { still } from './svg-kit'
 
 // Vector icons and spinners for the surfaces that draw `Svg` (the desktop app). Each is a
 // whole SVG document; animation is CSS, which plays in the image the desktop draws. Each
 // depends on its kind, colour and state alone, never on time, so a redraw is the same image
-// and its loop runs on (see loopSource).
+// and its loop runs on.
 
 // Outline paths on a 24-unit grid.
 const PATHS: Readonly<Record<Kind, string>> = {
@@ -38,10 +38,7 @@ type Mark = keyof typeof MARKS
 
 // A tool's icon; while it runs, an arc circles it; a failed or interrupted one carries
 // its mark, the kind's icon shrunk to the top-left to make room.
-export const toolIcon = (kind: Kind, color: string, isRunning: boolean, mark?: Mark): string =>
-  loopSource(`tool:${kind}:${color}:${isRunning}:${mark}`, () => drawToolIcon(kind, color, isRunning, mark))
-
-function drawToolIcon(kind: Kind, color: string, isRunning: boolean, mark?: Mark): string {
+export function toolIcon(kind: Kind, color: string, isRunning: boolean, mark?: Mark): string {
   const stroke = `<g fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${PATHS[kind]}</g>`
 
   if (mark !== undefined) {
@@ -62,9 +59,7 @@ export type SpinnerMode = 'requesting' | 'responding' | 'thinking' | 'tool-input
 
 // One motion per thing the turn is doing: a breathing orb while it thinks, a spinning
 // arc while a tool runs, an equaliser while it writes, bouncing dots while it waits.
-export const spinnerIcon = (mode: SpinnerMode, color: string): string => loopSource(`spinner:${mode}:${color}`, () => drawSpinner(mode, color))
-
-function drawSpinner(mode: SpinnerMode, color: string): string {
+export function spinnerIcon(mode: SpinnerMode, color: string): string {
   const fill = `fill="${color}"`
 
   switch (mode) {

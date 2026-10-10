@@ -4,6 +4,7 @@ import type { Prefs, TurnStats } from '../types'
 import { formatDuration, formatMs } from './format'
 import { columnWidths, cutCell, LINK, widthOf } from './markdown'
 import type { Segment, Table } from './markdown'
+import { ICONS } from './skin'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
@@ -20,11 +21,6 @@ import type { Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
 export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button' | 'Link'>
-
-// An experiment to try live: true draws the looping images (the band's rings, tool icons and
-// spinners) in the desktop's sandboxed frame instead of as an image. Off, they stay images.
-const LOOPS_INTERACTIVE = false
-const LOOP_PROPS = LOOPS_INTERACTIVE ? { isInteractive: true } : {}
 
 // The vector element, on the surfaces that have one (the desktop app).
 export type SvgElement = ElementTable<'desktop'>['Svg']
@@ -169,18 +165,29 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
   )
 }
 
+// The text cells a loop's Client takes: a fixed region never resizes, so the desktop never
+// draws it again for that, which would start its loop over.
+// ponytail: a guess at the desktop's body text (about 7px a column, 20px a row); measure a
+// cell live if an icon clips or sits loose.
+const CELL_W = 7
+const CELL_H = 20
+const cells = (px: number, per: number): number => Math.ceil((px / per) * 10) / 10
+
 // An image that may loop. `key` is the Client it moves in, under the animation budget; with
 // none it is drawn held. The desktop builds an Svg again on every redraw, which starts its
 // loop over, so there a loop is drawn by a Client (anim.tsx), which the desktop keeps across
-// redraws while its props stay the same; with no size of its own, its region is the image's.
-// An image only moves on the main thread: the desktop rasterises an SVG image's frames there,
-// so every loop on screen costs it.
+// redraws while its props stay the same. An image only moves on the main thread: the desktop
+// rasterises an SVG image's frames there, so every loop on screen costs it.
 function loopImage(look: Look, Svg: SvgElement, source: string, image: { alt: string; width: number; height: number }, key?: string) {
   const isLoop = isLooping(source) && key !== undefined
-  const drawn = { source: isLoop || !isLooping(source) ? source : held(source), ...image, ...LOOP_PROPS }
+  const drawn = { source: isLoop || !isLooping(source) ? source : held(source), ...image }
   const Client = look.client
 
-  return isLoop && Client !== undefined ? <Client key={key} module="./anim.tsx" props={drawn satisfies LoopProps} /> : <Svg {...drawn} />
+  return isLoop && Client !== undefined ? (
+    <Client key={key} module="./anim.tsx" props={drawn satisfies LoopProps} width={cells(image.width, CELL_W)} height={cells(image.height, CELL_H)} />
+  ) : (
+    <Svg {...drawn} />
+  )
 }
 
 // On a surface with vector icons, the icon leads the row in place of the status glyph.
@@ -343,10 +350,11 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
 
 // A card's Copy button laid over its top-right corner, level with its header, in the
 // slot the card leaves free there; nothing where nothing can copy. The image cannot be
-// pressed, so the button is a real one on top of it.
+// pressed, so the button is a real one on top of it. The slot fits one glyph, so the button
+// keeps the glyph whatever the icon set: only the desktop draws cards.
 function copyOverlay(look: Look, key: string, text: string) {
   const { Box } = look.ui
-  const button = copyButton(look, key, text)
+  const button = copyButton({ ...look, icons: ICONS.unicode }, key, text)
 
   return button === undefined ? (
     ''
@@ -576,7 +584,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
         return (
           <Box flexDirection="row" alignItems="center">
             {built.rings.flatMap(({ ring, text }, i) => [
-              loopImage(look, Svg, ring.source, { alt: ring.alt, width: ring.width, height: BAND_H }, moving.includes(i) ? `loop-${view.meters[i]?.label}` : undefined),
+              loopImage(look, Svg, ring.source, { alt: ring.alt, width: ring.width, height: BAND_H }, moving.includes(i) ? `loop-ring-${i}` : undefined),
               <Svg source={text.source} alt={text.alt} width={text.width} height={BAND_H} />,
             ])}
             {built.bar === undefined ? '' : <Svg source={built.bar.source} alt={built.bar.alt} width={built.bar.width} height={BAND_H} />}
