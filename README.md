@@ -103,7 +103,7 @@ Code's theme and Reduce motion settings and the `SKINS_THEME` and `COLORFGBG` va
 compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
 on macOS, `gsettings get org.gnome.desktop.interface color-scheme` on GNOME); it starts no other
 process, touches no file and makes no network call. It also publishes the drawn skin's colours as `skins.theme`
-(`mode`, `accent`, `foreground`, `dim`, `muted`, `red`, `selection`, `background`; `null` while the skin is off) for other mods' panels to match.
+(`mode`, `accent`, `foreground`, `dim`, `red`, `selection`, `background`; `null` while the skin is off) for other mods' panels to match.
 Check it yourself:
 
 ```bash

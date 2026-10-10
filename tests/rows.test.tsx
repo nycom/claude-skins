@@ -471,9 +471,17 @@ test('the band offers Compact, nudges at 70% context, and compacts on a press', 
   expect(((await idle.find({ key: 'compact' })) as { props: { hotkey?: string } } | undefined)?.props.hotkey).toBe('c')
 })
 
-test('the band sits last, nearest the prompt, below another mod’s row', async ($, on) => {
+test('the band sits last, nearest the prompt, below another mod’s row, and keeps that slot as the row comes and goes', async ($, on) => {
+  let isShown = true
   // Registered first, so it is what the skin's hook reaches when it hands the band on.
-  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Text', props: {}, children: ['PROGRESS'] }))
+  on('ui.render', { component: 'AbovePrompt' }, () => (isShown ? { type: 'Text', props: {}, children: ['PROGRESS'] } : { type: 'engine', ref: 0 }))
+  // The other mod's row comes and goes while the band stays mounted, as it does live. A test's
+  // hooks may not write state, so a pref the band does not show draws the band again, the
+  // whole chain with it.
+  const toggle = async (shown: boolean) => {
+    isShown = shown
+    await runSkin($, `clip ${shown ? 'off' : 'on'}`)
+  }
   stubEngine(on)
   on('session.start', () => ({ cwd: '/work' }))
   on('command.register', () => ({ value: { command: 'skin' } }))
@@ -482,15 +490,30 @@ test('the band sits last, nearest the prompt, below another mod’s row', async 
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
 
   for (const surface of SURFACES) {
+    isShown = true
     const band = await $.ui.mount(BAND(surface, false))
-    const column = (await band.drawn()) as { props: { rowGap?: number }; children: readonly unknown[] }
-    const first = JSON.stringify(column.children[0])
-    const last = JSON.stringify(column.children[column.children.length - 1])
+    const column = async () => (await band.drawn()) as { props: { rowGap?: number }; children: readonly unknown[] }
+    const shown = await column()
+    const first = JSON.stringify(shown.children[0])
+    const last = JSON.stringify(shown.children.at(-1))
 
+    expect(shown.children.length).toBe(2)
     expect(first).toContain('PROGRESS')
     expect(last).not.toContain('PROGRESS')
     expect(last).toContain(surface === 'desktop' ? 'Svg' : '% context')
-    expect(column.props.rowGap ?? 0).toBe(surface === 'desktop' ? 1 : 0)
+    expect(shown.props.rowGap ?? 0).toBe(surface === 'desktop' ? 1 : 0)
+
+    await toggle(false)
+    const alone = await column()
+
+    expect(alone.children.length).toBe(1)
+    expect(JSON.stringify(alone.children[0])).toBe(last)
+
+    await toggle(true)
+    const again = await column()
+
+    expect(again.children.length).toBe(2)
+    expect(JSON.stringify(again.children.at(-1))).toBe(last)
     await band.unmount()
   }
 })
@@ -1554,7 +1577,6 @@ test('the selected skin is published for other mods’ panels, and follows /skin
     accent: '#7aa2f7',
     foreground: '#c0caf5',
     dim: '#878daf',
-    muted: '#878daf',
     red: '#f7768e',
     selection: '#364366',
     background: '#1f2335',
