@@ -57,17 +57,6 @@ const compactingAtom = atom({ plugin: 'skins', key: 'compacting' } as const, fal
 const pinnedAtom = atom({ plugin: 'skins', key: 'pinned' } as const, false)
 const themeAtom = atom({ plugin: 'skins', key: 'theme' } as const, null as PanelTheme | null)
 const settledAtom = atom({ plugin: 'skins', key: 'settled' } as const, 0)
-// Per call, whether its icon may move; and how many calls' icons do.
-const loopAtom = atom({ plugin: 'skins', key: 'loop' } as const, false)
-const toolLoopsAtom = atom({ plugin: 'skins', key: 'toolLoops' } as const, 0)
-
-// The animation budget: every looping image costs the desktop's main thread, so at most this
-// many of the skin's move at once. The spinner always keeps one (it can show between turns, as
-// for background tasks), the newest running calls take up to TOOL_LOOPS, and the band's rings
-// what is left; the rest are drawn held.
-const LOOP_BUDGET = 3
-const TOOL_LOOPS = 2
-
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 
 // Only a person's own typing becomes a prompt row: a task notification or a peer's
@@ -349,34 +338,6 @@ async function commit($: EngineInterface, state: DesignState): Promise<void> {
   await savePrefs($, state.prefs)
 }
 
-// The main loop's calls running now, oldest first. A new session starts with none.
-// ponytail: one list per plugin process, as the turn's stats are; per session if one process
-// ever hosts several at once.
-let running: readonly string[] = []
-
-// Which calls' icons move changes only as a call starts or ends, never on a redraw. Changes
-// apply one at a time, in order, so a late write never lands over a newer one; a failed write
-// is dropped, as a call's result must not hang on its icon.
-let runningWrites: Promise<void> = Promise.resolve()
-
-function setRunning($: EngineInterface, change: (ids: readonly string[]) => readonly string[]): Promise<void> {
-  runningWrites = runningWrites
-    .then(async () => {
-      const was = new Set(running.slice(-TOOL_LOOPS))
-      running = change(running)
-      const now = new Set(running.slice(-TOOL_LOOPS))
-
-      for (const id of new Set([...was, ...now])) {
-        if (was.has(id) !== now.has(id)) await update($, memberOf(loopAtom, { requestId: id }), () => now.has(id))
-      }
-
-      if (was.size !== now.size) await update($, toolLoopsAtom, () => now.size)
-    })
-    .catch(() => {})
-
-  return runningWrites
-}
-
 async function designState($: EngineInterface): Promise<DesignState> {
   return { prefs: await read($, prefsAtom), custom: await read($, customAtom) }
 }
@@ -407,7 +368,6 @@ export const register: Register = on => {
     await refreshUsage($)
     await readConfig($, config)
     stopRelabel()
-    await setRunning($, () => [])
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -487,10 +447,9 @@ export const register: Register = on => {
   // Times every call and counts the main loop's calls and changed lines.
   on('tool.call', async ($, e, next) => {
     const startedAt = await $.clock.now()
-    // A subagent's calls have no row on the main transcript, so they take no loop.
+    // A subagent's calls have no row on the main transcript, so they are not counted.
     const isMain = e.agentId === undefined
-    if (isMain) await setRunning($, ids => [...ids, e.tool_use_id])
-    const ran = await next(e).finally(() => (isMain ? setRunning($, ids => ids.filter(id => id !== e.tool_use_id)) : undefined))
+    const ran = await next(e)
     const ms = (await $.clock.now()) - startedAt
 
     await update($, memberOf(durationAtom, { requestId: e.tool_use_id }), () => ms)
@@ -620,8 +579,6 @@ reply width: ${lastColumns} columns`
     const diff = diffstat(e.props.output)
     const target = summarize(e.props.tool, e.props.input, await $.session.cwd())
 
-    const moves = await read($, memberOf(loopAtom, { requestId: e.props.tool_use_id }))
-
     return toolRow(
       lookOf($.ui.resolve(e), active, e.surface),
       e.props,
@@ -631,7 +588,7 @@ reply width: ${lastColumns} columns`
         ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
         ...(diff === null ? {} : diff),
       },
-      moves ? `loop-${e.props.tool_use_id}` : undefined,
+      `loop-${e.props.tool_use_id}`,
     )
   })
 
@@ -643,9 +600,8 @@ reply width: ${lastColumns} columns`
     }
 
     const ids = e.props.calls.flatMap(call => (call.tool_use_id === undefined ? [] : [call.tool_use_id]))
-    const moves = await Promise.all(ids.map(id => read($, memberOf(loopAtom, { requestId: id }))))
-    // Keyed by the group's first call, so the Client stays while any of its calls moves.
-    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls, moves.includes(true) ? `loop-${ids[0]}` : undefined)
+    // Keyed by the group's first call, so the Client stays as the group's calls end.
+    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls, `loop-${ids[0]}`)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -805,7 +761,6 @@ reply width: ${lastColumns} columns`
     }
 
     const starts = ramp(meters, now)
-    const ringLoops = Math.max(0, LOOP_BUDGET - 1 - (await read($, toolLoopsAtom)))
     const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
@@ -856,7 +811,7 @@ reply width: ${lastColumns} columns`
     return (
       <Box flexDirection="column" rowGap={above !== null && look.surface === 'desktop' ? 1 : 0}>
         {above}
-        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns, ringLoops)}
+        {usageBand(look, meters, !e.props.isWorking && !isCompacting, compact, starts, partsOf(usage.parts ?? []), e.props.bodyColumns)}
       </Box>
     )
   })

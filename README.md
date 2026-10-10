@@ -63,9 +63,7 @@ A card rises in row by row on its first draw only, the last row starting within 
 the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
 theme change) never replays it. A table that streams in rises only the rows added since its last draw.
 A table, code, diff or terminal card scrolled back into view, or drawn again under a new request, holds still.
-On the desktop at most three images loop at once, because each costs the main thread: the spinner always keeps one,
-the two newest running tool calls on the main transcript take the next (a subagent's calls take none), and the band's rings
-get what is left; the rest are drawn held, and a one-shot such as a finished call's icon still plays. A redraw never restarts a running loop.
+On the desktop a redraw never restarts a running loop: the spinner, a running call's icon and the band's rings each keep their own place.
 The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s
 after a change the band settles still, so nothing replays. The context bar never animates. Its parts
 are the local estimate /context makes, which sends no requests, read whenever the band's numbers refresh. Reduced motion holds the icons, the cards,

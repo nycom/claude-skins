@@ -110,8 +110,7 @@ test('a Bash call is a node on the terminal\u2019s rail and an icon row on the d
   await desktop.unmount()
 
   const running = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'tu3', isRunning: true }), 'desktop'))
-  const spinning = (await running.find({ type: 'Svg' })) as { props: { source: string } } | undefined
-  expect(spinning?.props.source).toContain('class="spin"')
+  expect((await clientsOf(running))[0]?.props.props?.source).toContain('class="spin"')
   await running.unmount()
 
   // A failed call says so by a mark on the icon and in its alt, not by colour alone.
@@ -1300,8 +1299,7 @@ test('each ring is an image of its own, byte-identical whatever its tokens, rese
   expect(later.all).toContain('3:10pm')
   expect(later.all).toContain('msgs 74%')
   expect(later.looping).toEqual(first.looping)
-  // The spinner keeps one of the three loops, so two rings move and the third is held.
-  expect(first.looping.length).toBe(2)
+  expect(first.looping.length).toBe(3)
   for (const source of first.looping) {
     expect(source).not.toContain('<text')
     expect(source).not.toContain('class="part"')
@@ -1335,9 +1333,8 @@ test('a running arc, a folded group’s arc and every desktop spinner draw the s
   await clock.advance(1370)
   const later = await draw()
 
-  // The row's and the group's arcs are drawn held (no call started them), the spinners loop.
   expect(first.length).toBe(6)
-  expect(first.filter(source => source.includes(' infinite')).length).toBe(4)
+  expect(first.filter(source => source.includes(' infinite')).length).toBe(6)
   expect(later).toEqual(first)
   for (const source of first) {
     expect(timedDelays(source)).toEqual([])
@@ -1700,49 +1697,14 @@ test('desktop loops are Clients under a stable key at their drawing\u2019s size,
   expect(JSON.stringify(later.map(found => found.clients))).toBe(JSON.stringify([row, spinner, band].map(found => found.clients)))
 })
 
-test('at most three loops move at once: the spinner and the newest running rows, the rest held', async ($, on) => {
+test('every loop moves: the spinner, each running row and the band\u2019s ring', async ($, on) => {
   const { calls } = await liveDesktop($, on)
   const ids = ['r1', 'r2', 'r3', 'r4', 'r5']
   for (const id of ids) await calls.start(id)
-  // A held loop plays its endless animations no times.
-  const isHeld = (source = '') => source.includes('<style>') && !source.includes(' infinite')
-  const drawAll = async () => {
-    const rows = await Promise.all(ids.map(id => clientsDrawn($, runningRow(id))))
-    const spinner = await clientsDrawn($, spinnerAt('desktop'))
-    const band = await clientsDrawn($, BAND('desktop', true))
-    return { rows, spinner, band }
-  }
 
-  const all = await drawAll()
-  expect(all.rows.map(row => row.clients.map(keyOf))).toEqual([[], [], [], ['loop-r4'], ['loop-r5']])
-  expect(all.spinner.clients.map(keyOf)).toEqual(['loop-spinner'])
-  expect(all.band.clients).toEqual([])
-  // The rows past the budget, and the band's ring, are drawn held.
-  for (const row of all.rows.slice(0, 3)) expect(isHeld(row.svgs[0]?.source)).toBe(true)
-  expect(isHeld(all.band.svgs.find(svg => svg.source.includes('<mask id="jog"'))?.source)).toBe(true)
-
-  // A row that ends hands its place to the newest still running, a row left on screen included.
-  const r3 = await $.ui.mount(runningRow('r3'))
-  expect(await clientsOf(r3)).toEqual([])
-  await calls.finish('r5')
-  expect((await clientsOf(r3)).map(keyOf)).toEqual(['loop-r3'])
-  await r3.unmount()
-  const after = await drawAll()
-  expect(after.rows.slice(0, 4).map(row => row.clients.map(keyOf))).toEqual([[], [], ['loop-r3'], ['loop-r4']])
-  // With every call done and the turn over, the band's ring moves again.
-  for (const id of ids) await calls.finish(id)
-  expect((await clientsDrawn($, BAND('desktop', false))).clients.map(keyOf)).toEqual(['loop-ring-0'])
-})
-
-test('calls started together still move at most the two newest rows', async ($, on) => {
-  const { calls } = await liveDesktop($, on)
-  const ids = ['p1', 'p2', 'p3', 'p4', 'p5']
-  await calls.start('p1')
-  await calls.start('p2')
-  await Promise.all(ids.slice(2).map(id => calls.start(id)))
-
-  const rows = await Promise.all(ids.map(id => clientsDrawn($, runningRow(id))))
-  expect(rows.map(row => row.clients.map(keyOf))).toEqual([[], [], [], ['loop-p4'], ['loop-p5']])
+  for (const id of ids) expect((await clientsDrawn($, runningRow(id))).clients.map(keyOf)).toEqual([`loop-${id}`])
+  expect((await clientsDrawn($, spinnerAt('desktop'))).clients.map(keyOf)).toEqual(['loop-spinner'])
+  expect((await clientsDrawn($, BAND('desktop', true))).clients.map(keyOf)).toEqual(['loop-ring-0'])
 })
 
 test('two 7-day rings that both move take a key each', async ($, on) => {
@@ -1813,21 +1775,8 @@ test('the terminal draws no Client: its rows, spinner and band stay text', async
   expect(await row.find({ type: 'Text', text: /○─ Bash {2}sleep 9/ })).toBeDefined()
 })
 
-test('a subagent\u2019s calls take no loop: the main transcript\u2019s running rows keep theirs', async ($, on) => {
-  const { calls } = await liveDesktop($, on)
-  await calls.start('agent-call')
-  await calls.start('inner-1', 'agent-1')
-  await calls.start('inner-2', 'agent-1')
-
-  expect((await clientsDrawn($, runningRow('agent-call'))).clients.map(keyOf)).toEqual(['loop-agent-call'])
-  await calls.finish('inner-2')
-  await calls.start('inner-3', 'agent-1')
-  expect((await clientsDrawn($, runningRow('agent-call'))).clients.map(keyOf)).toEqual(['loop-agent-call'])
-})
-
 test('a still icon on the desktop is drawn bare, in its row, with no box sized for it', async ($, on) => {
-  const { calls } = await liveDesktop($, on)
-  for (const id of ['b1', 'b2', 'b3']) await calls.start(id)
+  await liveDesktop($, on)
   type Node = { type?: string; props?: Record<string, unknown>; children?: readonly unknown[] }
   // The element each Svg sits in.
   const parentsOfSvgs = async (element: Parameters<Engine['ui']['mount']>[0]) => {
@@ -1845,10 +1794,7 @@ test('a still icon on the desktop is drawn bare, in its row, with no box sized f
     return parents
   }
 
-  // A finished row, and a running one past the budget.
-  for (const element of [toolUse(call('Bash', { command: 'pnpm test' }), 'desktop'), runningRow('b1')]) {
-    const [parent] = await parentsOfSvgs(element)
-    expect(parent?.props?.flexDirection).toBe('row')
-    expect(parent?.props?.width).toBeUndefined()
-  }
+  const [parent] = await parentsOfSvgs(toolUse(call('Bash', { command: 'pnpm test' }), 'desktop'))
+  expect(parent?.props?.flexDirection).toBe('row')
+  expect(parent?.props?.width).toBeUndefined()
 })

@@ -12,7 +12,7 @@ import type { LoopProps } from './anim'
 import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
-import { PX_PER_COLUMN, cardWidth, held, isLooping } from './svg-kit'
+import { PX_PER_COLUMN, cardWidth, isLooping } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
@@ -173,14 +173,12 @@ const CELL_W = 7
 const CELL_H = 20
 const cells = (px: number, per: number): number => Math.ceil((px / per) * 10) / 10
 
-// An image that may loop. `key` is the Client it moves in, under the animation budget; with
-// none it is drawn held. The desktop builds an Svg again on every redraw, which starts its
+// An image that may loop. `key` is the Client it moves in; with none it is drawn bare. The desktop builds an Svg again on every redraw, which starts its
 // loop over, so there a loop is drawn by a Client (anim.tsx), which the desktop keeps across
-// redraws while its props stay the same. An image only moves on the main thread: the desktop
-// rasterises an SVG image's frames there, so every loop on screen costs it.
+// redraws while its props stay the same.
 function loopImage(look: Look, Svg: SvgElement, source: string, image: { alt: string; width: number; height: number }, key?: string) {
   const isLoop = isLooping(source) && key !== undefined
-  const drawn = { source: isLoop || !isLooping(source) ? source : held(source), ...image }
+  const drawn = { source, ...image }
   const Client = look.client
 
   return isLoop && Client !== undefined ? (
@@ -205,7 +203,7 @@ function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[]
   )
 }
 
-// `loop` is the Client key a running icon moves under; without one it is held.
+// `loop` is the Client key a running icon moves under.
 export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, loop?: string) {
   const { Text } = look.ui
   const { palette } = look.skin
@@ -565,8 +563,7 @@ function keptExtras(meters: readonly Meter[], parts: readonly Part[], kept: numb
 }
 
 // The meters with as many extras as fit `room` columns; with none, whatever their width.
-// `ringLoops`: how many of the rings may move, the first that loop; the rest are held.
-function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[], ringLoops: number) {
+function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[], room: number, starts: readonly number[], loopKey: string) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
 
@@ -577,14 +574,12 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
       const Svg = look.svg
       const built = usageSvg(view.meters, palette, starts, view.parts)
 
-      // Each ring an image of its own, so a ring under the budget moves in a Client of its own.
+      // Each ring an image of its own, so a ring moves in a Client of its own.
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
-        const moving = built.rings.flatMap(({ ring }, i) => (isLooping(ring.source) ? [i] : [])).slice(0, ringLoops)
-
         return (
           <Box flexDirection="row" alignItems="center">
             {built.rings.flatMap(({ ring, text }, i) => [
-              loopImage(look, Svg, ring.source, { alt: ring.alt, width: ring.width, height: BAND_H }, moving.includes(i) ? `loop-ring-${i}` : undefined),
+              loopImage(look, Svg, ring.source, { alt: ring.alt, width: ring.width, height: BAND_H }, `${loopKey}-ring-${i}`),
               <Svg source={text.source} alt={text.alt} width={text.width} height={BAND_H} />,
             ])}
             {built.bar === undefined ? '' : <Svg source={built.bar.source} alt={built.bar.alt} width={built.bar.width} height={BAND_H} />}
@@ -635,7 +630,7 @@ export function usageBand(
   starts: readonly number[] = [],
   parts: readonly Part[] = [],
   columns = Infinity,
-  ringLoops = 0,
+  loopKey = 'loop',
 ) {
   const { Box, Text, Button } = look.ui
   const { palette } = look.skin
@@ -651,7 +646,7 @@ export function usageBand(
   return (
     // bodyColumns already leave out the engine's collapse mark ([-]) at the right edge.
     <Box flexDirection="row" alignItems="center" columnGap={2}>
-      {meterView(look, meters, parts, columns - reserved, starts, ringLoops)}
+      {meterView(look, meters, parts, columns - reserved, starts, loopKey)}
       <Box flexGrow={1} />
       {isOffered && isNudge ? (
         <Box flexShrink={0}>

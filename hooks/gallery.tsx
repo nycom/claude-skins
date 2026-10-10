@@ -64,7 +64,7 @@ export function galleryPane(look: Look, columns: number) {
       {section(
         'Tool rows: finished, running, failed',
         toolRow(look, { tool: 'Bash', input: {}, ...done }, 'run', 'pnpm test --filter hub', { ms: 2140 }),
-        toolRow(look, { tool: 'Read', input: {}, ...done, isRunning: true }, 'read', 'docs/protocols.md', {}),
+        toolRow(look, { tool: 'Read', input: {}, ...done, isRunning: true }, 'read', 'docs/protocols.md', {}, 'loop-demo-read'),
         toolRow(look, { tool: 'Edit', input: {}, ...done, isErrored: true }, 'write', 'apps/hub/src/server.ts', {}),
       )}
       {section('Folded group of reads and searches', groupRow(look, [{ tool: 'Read', input: {}, ...done }, { tool: 'Read', input: {}, ...done }, { tool: 'Grep', input: {}, ...done }]))}
@@ -86,15 +86,15 @@ export function galleryPane(look: Look, columns: number) {
         ? section('Spinner', spinnerRow(look, look.skin.spinner[0] ?? 'Working', 3, 12_000))
         : section(
             'Spinner: thinking, tool running, writing, waiting',
-            desktopSpinnerRow(look, svg, 'thinking', 'Thinking'),
-            desktopSpinnerRow(look, svg, 'tool-use', 'Running pnpm test'),
-            desktopSpinnerRow(look, svg, 'responding', 'Writing the reply'),
-            desktopSpinnerRow(look, svg, 'requesting', 'Waiting for the model'),
+            desktopSpinnerRow(look, svg, 'thinking', 'Thinking', 'loop-demo-thinking'),
+            desktopSpinnerRow(look, svg, 'tool-use', 'Running pnpm test', 'loop-demo-tool-use'),
+            desktopSpinnerRow(look, svg, 'responding', 'Writing the reply', 'loop-demo-responding'),
+            desktopSpinnerRow(look, svg, 'requesting', 'Waiting for the model', 'loop-demo-requesting'),
           )}
       {section(
         'Band above the prompt: normal, then nudging to compact',
-        usageBand(look, [{ label: 'context', percent: 55 }, { label: '5h', percent: 18 }], true, () => undefined),
-        usageBand(look, [{ label: 'context', percent: 85 }, { label: '5h', percent: 61 }], true, () => undefined),
+        usageBand(look, [{ label: 'context', percent: 55 }, { label: '5h', percent: 18 }], true, () => undefined, [], [], Infinity, 'loop-demo-a'),
+        usageBand(look, [{ label: 'context', percent: 85 }, { label: '5h', percent: 61 }], true, () => undefined, [], [], Infinity, 'loop-demo-b'),
       )}
       {section('Band above a question', askBand(look, ['Approach', 'Store']))}
       {section('Turn footer (terminal)', footerRow(look, look.skin.done[0] ?? 'Done', 41_000, { tools: 6, added: 18, removed: 3 }))}

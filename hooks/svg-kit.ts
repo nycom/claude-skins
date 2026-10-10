@@ -120,10 +120,6 @@ export const still = (moving?: string): string =>
 // Whether a drawing loops as drawn now: an endless animation, motion not held.
 export const isLooping = (source: string): boolean => !isStill && !isRedraw && source.includes(' infinite')
 
-// A looping drawing held still, for one past the animation budget: each endless animation
-// plays no times, so it draws as unanimated, while a one-shot (a ring's growth) still plays.
-export const held = (source: string): string => source.replaceAll(' infinite', ' 0')
-
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>
   `style="animation-delay:${startMs + staggerMs(index, stepMs)}ms"`
 
