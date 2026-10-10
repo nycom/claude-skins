@@ -63,6 +63,9 @@ A card rises in row by row on its first draw only, the last row starting within 
 the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
 theme change) never replays it. A table that streams in rises only the rows added since its last draw.
 A table, code, diff or terminal card scrolled back into view, or drawn again under a new request, holds still.
+On the desktop at most three images loop at once, because each costs the main thread: the spinner always keeps one,
+the two newest running tool calls on the main transcript take the next (a subagent's calls take none), and the band's rings
+get what is left; the rest are drawn held, and a one-shot such as a finished call's icon still plays. A redraw never restarts a running loop.
 The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s
 after a change the band settles still, so nothing replays. The context bar never animates. Its parts
 are the local estimate /context makes, which sends no requests, read whenever the band's numbers refresh. Reduced motion holds the icons, the cards,
@@ -101,7 +104,8 @@ It draws and remembers. It reads the session's directory, your context and plan 
 Code's theme and Reduce motion settings and the `SKINS_THEME` and `COLORFGBG` variables; keeps its settings in the mod store; registers one tool for your agent; and
 compacts only when you press Compact, and copies only when you press Copy. With the `auto` theme it asks the system for its appearance once a minute (`defaults read -g AppleInterfaceStyle`
 on macOS, `gsettings get org.gnome.desktop.interface color-scheme` on GNOME); it starts no other
-process, touches no file and makes no network call.
+process, touches no file and makes no network call. It also publishes the drawn skin's colours as `skins.theme`
+(`mode`, `accent`, `foreground`, `dim`, `muted`, `red`, `selection`, `background`; `null` while the skin is off) for other mods' panels to match.
 Check it yourself:
 
 ```bash
