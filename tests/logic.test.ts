@@ -12,7 +12,7 @@ import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/s
 import { fitColumns } from '../hooks/table-card'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
 import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, RING_W, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
-import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, mix, resolveLight, toLight } from '../hooks/light'
+import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, selectionOf, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
 import { kindOf, summarize, toolLabel } from '../hooks/tools'
@@ -565,7 +565,7 @@ test('a pinned folder keeps its own prefs, others follow the default', async () 
   expect(parseFolders('junk', NAMES)).toEqual({})
 })
 
-test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async () => {
+test('every skin reads at 4.5:1 on both host backgrounds, dark and light, and its selection at 5:1', async () => {
   const roles = ['read', 'write', 'run', 'search', 'web', 'mcp', 'other', 'user', 'fg', 'muted', 'ok', 'err', 'warn'] as const
   const made = resolveSkin('my-noir', { 'my-noir': { name: 'my-noir', label: 'x', base: 'noir', palette: {}, spinner: [], done: [] } })
   const dark = ['#262624', '#1f1e1d']
@@ -582,8 +582,8 @@ test('every skin reads at 4.5:1 on both host backgrounds, dark and light', async
     }
 
     for (const [mode, palette, bgs] of [['dark', skin.palette, dark], ['light', forTheme(skin, true).palette, [LIGHT_BG]]] as const) {
-      // The published selection: body text reads at 5:1 on a quarter of the accent over the surface.
-      expect(`${skin.name} ${mode} selection ${contrast(palette.fg, mix(palette.surface, palette.user, 0.25)) >= 5}`).toBe(`${skin.name} ${mode} selection true`)
+      // The published selection: body text reads on it at 5:1.
+      expect(`${skin.name} ${mode} selection ${contrast(palette.fg, selectionOf(palette)) >= 5}`).toBe(`${skin.name} ${mode} selection true`)
 
       for (const bg of bgs) {
         // A changed line's text, numbers and sign sit on its tint, at 4.5:1.

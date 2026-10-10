@@ -4,7 +4,7 @@ import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-cod
 import type { CustomSkin, PanelTheme, Prefs, SkinSlot, TurnStats, UsageSnap } from '../types'
 import { DEFAULT_PREFS, parsePrefs, runSkinCommand, TOGGLES } from './command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from './custom'
-import { forTheme, mix, resolveLight } from './light'
+import { forTheme, resolveLight, selectionOf } from './light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from './folders'
 import { DESIGN_TOOL, runDesign } from './designer'
 import type { DesignState } from './designer'
@@ -91,7 +91,7 @@ async function publishTheme($: EngineInterface): Promise<void> {
           foreground: p.fg,
           dim: p.muted,
           red: p.err,
-          selection: mix(p.surface, p.user, 0.25),
+          selection: selectionOf(p),
           background: p.surface,
         }
 
