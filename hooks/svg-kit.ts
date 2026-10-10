@@ -120,13 +120,14 @@ export const still = (moving?: string): string =>
 // Whether a drawing loops as drawn now: an endless animation, motion not held.
 export const isLooping = (source: string): boolean => !isStill && !isRedraw && source.includes(' infinite')
 
-// A looping drawing held still, for one past the animation budget.
-export const held = (source: string): string => source.replace('</style>', `${HOLD}</style>`)
+// A looping drawing held still, for one past the animation budget: each endless animation
+// plays no times, so it draws as unanimated, while a one-shot (a ring's growth) still plays.
+export const held = (source: string): string => source.replaceAll(' infinite', ' 0')
 
-// A looping drawing's source, built once per input and the same string from then on. The
-// desktop draws an Svg as an image of its source: an unchanged source keeps its animation
-// running through a redraw, a changed one is a new image whose loops start over. Held still
-// or redrawn, a source differs (see `still`), so those are part of the key.
+// A looping drawing's source, built once per input and the same string from then on, so a
+// loop's Client gets the same props on a redraw and the desktop does not draw it again (an
+// Svg drawn bare is a new image on every redraw whatever its source). Held still or redrawn,
+// a source differs (see `still`), so those are part of the key.
 // ponytail: cleared whole when full; readings, skins and kinds keep it to a few dozen.
 const loops = new Map<string, string>()
 

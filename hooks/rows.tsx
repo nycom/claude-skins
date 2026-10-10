@@ -169,38 +169,18 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
   )
 }
 
-// The room an image takes in the desktop's text cells, which its Client or box keeps fixed
-// whatever the image, so a row does not shift when its icon starts or stops moving.
-// ponytail: a guess at the desktop's body text (about 7px a column, 20px a row); measure a
-// cell live if an icon clips or sits loose.
-const CELL_W = 7
-const CELL_H = 20
-const cells = (px: number, per: number): number => Math.ceil((px / per) * 10) / 10
-
 // An image that may loop. `key` is the Client it moves in, under the animation budget; with
 // none it is drawn held. The desktop builds an Svg again on every redraw, which starts its
 // loop over, so there a loop is drawn by a Client (anim.tsx), which the desktop keeps across
-// redraws while its props stay the same. An image only moves on the main thread: the desktop
-// rasterises an SVG image's frames there, so every loop on screen costs it.
+// redraws while its props stay the same; with no size of its own, its region is the image's.
+// An image only moves on the main thread: the desktop rasterises an SVG image's frames there,
+// so every loop on screen costs it.
 function loopImage(look: Look, Svg: SvgElement, source: string, image: { alt: string; width: number; height: number }, key?: string) {
   const isLoop = isLooping(source) && key !== undefined
   const drawn = { source: isLoop || !isLooping(source) ? source : held(source), ...image, ...LOOP_PROPS }
-
-  if (look.client === undefined) {
-    return <Svg {...drawn} />
-  }
-
-  const { Box } = look.ui
   const Client = look.client
-  const size = { width: cells(image.width, CELL_W), height: cells(image.height, CELL_H) }
 
-  return isLoop ? (
-    <Client key={key} module="./anim.tsx" props={drawn satisfies LoopProps} width={size.width} height={size.height} />
-  ) : (
-    <Box {...size} flexShrink={0}>
-      <Svg {...drawn} />
-    </Box>
-  )
+  return isLoop && Client !== undefined ? <Client key={key} module="./anim.tsx" props={drawn satisfies LoopProps} /> : <Svg {...drawn} />
 }
 
 // On a surface with vector icons, the icon leads the row in place of the status glyph.
@@ -589,7 +569,7 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
       const Svg = look.svg
       const built = usageSvg(view.meters, palette, starts, view.parts)
 
-      // Each ring an image of its own, so what changes beside it leaves its loop running.
+      // Each ring an image of its own, so a ring under the budget moves in a Client of its own.
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
         const moving = built.rings.flatMap(({ ring }, i) => (isLooping(ring.source) ? [i] : [])).slice(0, ringLoops)
 

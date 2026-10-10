@@ -71,7 +71,7 @@ const runSkin = ($: Engine, args: string) =>
 
 // The engine's own answers, so a hook can mount without a session. A test answering
 // the environment or the store itself leaves them out.
-function stubEngine(on: On, own: { env?: boolean; store?: boolean } = {}) {
+function stubEngine(on: On, own: { env?: boolean; store?: boolean; usage?: boolean } = {}) {
   const clock = mock.clock(on, { now: 10_000 })
   on('session.cwd', () => ({ value: '/work' }))
   if (!own.env) {
@@ -83,7 +83,9 @@ function stubEngine(on: On, own: { env?: boolean; store?: boolean } = {}) {
   }
   on('ui.toast', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [{ kind: 'five_hour', percentUsed: 18 }] } }))
+  if (!own.usage) {
+    on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [{ kind: 'five_hour', percentUsed: 18 }] } }))
+  }
   // The dialog must hold Claude Code's own drawing, which a real engine hands back by reference.
   on('ui.render', ($, e) => (e.component === 'AskUserQuestion' ? { type: 'engine', ref: 0 } : STOCK))
 
@@ -1294,7 +1296,8 @@ test('each ring is an image of its own, byte-identical whatever its tokens, rese
   expect(later.all).toContain('3:10pm')
   expect(later.all).toContain('msgs 74%')
   expect(later.looping).toEqual(first.looping)
-  expect(first.looping.length).toBe(3)
+  // The spinner keeps one of the three loops, so two rings move and the third is held.
+  expect(first.looping.length).toBe(2)
   for (const source of first.looping) {
     expect(source).not.toContain('<text')
     expect(source).not.toContain('class="part"')
@@ -1318,7 +1321,7 @@ test('a running arc, a folded group’s arc and every desktop spinner draw the s
     const found: string[] = []
     for (const element of [running, group, ...spinners]) {
       const ui = await $.ui.mount(element)
-      found.push(...(await loopingOf(ui)))
+      found.push(...(await svgsOf(ui)).map(svg => svg.source))
       await ui.unmount()
     }
     return found
@@ -1328,7 +1331,9 @@ test('a running arc, a folded group’s arc and every desktop spinner draw the s
   await clock.advance(1370)
   const later = await draw()
 
+  // The row's and the group's arcs are drawn held (no call started them), the spinners loop.
   expect(first.length).toBe(6)
+  expect(first.filter(source => source.includes(' infinite')).length).toBe(4)
   expect(later).toEqual(first)
   for (const source of first) {
     expect(timedDelays(source)).toEqual([])
@@ -1609,10 +1614,11 @@ function heldCalls($: Engine, on: On) {
     }),
   )
   return {
-    start: (id: string) =>
+    // `agentId`: a subagent's call, which has no row on the main transcript.
+    start: (id: string, agentId?: string) =>
       new Promise<void>(resolve => {
         reached.set(id, resolve)
-        ended.set(id, $.tool.call({ tool: 'Bash', command: 'sleep 9', tool_use_id: id } as never))
+        ended.set(id, $.tool.call({ tool: 'Bash', command: 'sleep 9', tool_use_id: id, ...(agentId === undefined ? {} : { agentId }) } as never))
       }),
     finish: async (id: string) => {
       release.get(id)?.()
@@ -1621,8 +1627,8 @@ function heldCalls($: Engine, on: On) {
   }
 }
 
-async function liveDesktop($: Engine, on: On, reduces = false) {
-  const clock = stubEngine(on)
+async function liveDesktop($: Engine, on: On, reduces = false, ownUsage = false) {
+  const clock = stubEngine(on, { usage: ownUsage })
   on('config.list', () => ({ value: [{ key: 'reduceMotion', label: 'Reduce motion', kind: 'boolean', value: reduces, provider: { kind: 'engine' }, isLocked: false }] as never }))
   on('session.start', () => ({ cwd: '/work' }))
   on('command.register', () => ({ value: { command: 'skin' } }))
@@ -1647,8 +1653,14 @@ async function clientsDrawn($: Engine, element: Parameters<Engine['ui']['mount']
   return { clients, drawn, svgs }
 }
 
-test('desktop loops are Clients under a stable key and a fixed size, their props byte-identical across redraws', async ($, on) => {
-  const { clock, calls } = await liveDesktop($, on)
+test('desktop loops are Clients under a stable key at their drawing\u2019s size, their props byte-identical across redraws', async ($, on) => {
+  let reads = 0
+  on('session.usage', () => {
+    reads += 1
+    return { value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [{ kind: 'five_hour', percentUsed: 18 }] } }
+  })
+  on('session.measure', () => ({ changed: ['context'] }) as never)
+  const { clock, calls } = await liveDesktop($, on, false, true)
   await calls.start('run-1')
   const draw = async () => [await clientsDrawn($, runningRow('run-1')), await clientsDrawn($, spinnerAt('desktop')), await clientsDrawn($, BAND('desktop', true))] as const
 
@@ -1664,19 +1676,22 @@ test('desktop loops are Clients under a stable key and a fixed size, their props
     expect(found.clients.map(keyOf)).toEqual([key])
     const [client] = found.clients
     expect(client?.props.module).toBe('hooks/anim.tsx')
-    expect(typeof client?.props.width).toBe('number')
-    expect(typeof client?.props.height).toBe('number')
+    // No size of its own: the region is as large as the image the module draws.
+    expect(client?.props.width).toBeUndefined()
+    expect(client?.props.height).toBeUndefined()
     // The module draws the looping image itself.
     expect(found.drawn[0]).toMatchObject({ type: 'Svg', props: { source: client?.props.props?.source } })
     expect(client?.props.props?.source).toContain(' infinite')
   }
   expect(row.clients[0]?.props.props?.source).toContain('class="spin"')
 
-  // The clock moves on, another call starts and ends, a new usage reading lands.
+  // The clock moves on, another call starts and ends, the same usage reading lands again.
   await clock.advance(1370)
   await calls.start('other')
   await calls.finish('other')
-  await $.session.measure({} as never).catch(() => undefined)
+  const before = reads
+  await $.session.measure({ context: { window: 200000, percent: 42 }, rateLimits: [], changed: ['context'] } as never)
+  expect(reads).toBeGreaterThan(before)
   const later = await draw()
   expect(JSON.stringify(later.map(found => found.clients))).toBe(JSON.stringify([row, spinner, band].map(found => found.clients)))
 })
@@ -1685,7 +1700,8 @@ test('at most three loops move at once: the spinner and the newest running rows,
   const { calls } = await liveDesktop($, on)
   const ids = ['r1', 'r2', 'r3', 'r4', 'r5']
   for (const id of ids) await calls.start(id)
-  const held = '*{animation:none!important}</style>'
+  // A held loop plays its endless animations no times.
+  const isHeld = (source = '') => source.includes('<style>') && !source.includes(' infinite')
   const drawAll = async () => {
     const rows = await Promise.all(ids.map(id => clientsDrawn($, runningRow(id))))
     const spinner = await clientsDrawn($, spinnerAt('desktop'))
@@ -1698,11 +1714,15 @@ test('at most three loops move at once: the spinner and the newest running rows,
   expect(all.spinner.clients.map(keyOf)).toEqual(['loop-spinner'])
   expect(all.band.clients).toEqual([])
   // The rows past the budget, and the band's ring, are drawn held.
-  for (const row of all.rows.slice(0, 3)) expect(row.svgs[0]?.source).toContain(held)
-  expect(all.band.svgs.find(svg => svg.source.includes('<mask id="jog"'))?.source).toContain(held)
+  for (const row of all.rows.slice(0, 3)) expect(isHeld(row.svgs[0]?.source)).toBe(true)
+  expect(isHeld(all.band.svgs.find(svg => svg.source.includes('<mask id="jog"'))?.source)).toBe(true)
 
-  // A row that ends hands its place to the newest still running.
+  // A row that ends hands its place to the newest still running, a row left on screen included.
+  const r3 = await $.ui.mount(runningRow('r3'))
+  expect(await clientsOf(r3)).toEqual([])
   await calls.finish('r5')
+  expect((await clientsOf(r3)).map(keyOf)).toEqual(['loop-r3'])
+  await r3.unmount()
   const after = await drawAll()
   expect(after.rows.slice(0, 4).map(row => row.clients.map(keyOf))).toEqual([[], [], ['loop-r3'], ['loop-r4']])
   // With every call done and the turn over, the band's ring moves again.
@@ -1737,4 +1757,44 @@ test('the terminal draws no Client: its rows, spinner and band stay text', async
   }
   const row = await $.ui.mount(runningRow('t-1', 'terminal'))
   expect(await row.find({ type: 'Text', text: /○─ Bash {2}sleep 9/ })).toBeDefined()
+})
+
+test('a subagent\u2019s calls take no loop: the main transcript\u2019s running rows keep theirs', async ($, on) => {
+  const { calls } = await liveDesktop($, on)
+  await calls.start('agent-call')
+  await calls.start('inner-1', 'agent-1')
+  await calls.start('inner-2', 'agent-1')
+
+  expect((await clientsDrawn($, runningRow('agent-call'))).clients.map(keyOf)).toEqual(['loop-agent-call'])
+  await calls.finish('inner-2')
+  await calls.start('inner-3', 'agent-1')
+  expect((await clientsDrawn($, runningRow('agent-call'))).clients.map(keyOf)).toEqual(['loop-agent-call'])
+})
+
+test('a still icon on the desktop is drawn bare, in its row, with no box sized for it', async ($, on) => {
+  const { calls } = await liveDesktop($, on)
+  for (const id of ['b1', 'b2', 'b3']) await calls.start(id)
+  type Node = { type?: string; props?: Record<string, unknown>; children?: readonly unknown[] }
+  // The element each Svg sits in.
+  const parentsOfSvgs = async (element: Parameters<Engine['ui']['mount']>[0]) => {
+    const ui = await $.ui.mount(element)
+    const parents: Node[] = []
+    const walk = (node: unknown): void => {
+      const el = (typeof node === 'object' && node !== null ? node : {}) as Node
+      for (const child of el.children ?? []) {
+        if ((child as Node)?.type === 'Svg') parents.push(el)
+        walk(child)
+      }
+    }
+    walk(await ui.drawn())
+    await ui.unmount()
+    return parents
+  }
+
+  // A finished row, and a running one past the budget.
+  for (const element of [toolUse(call('Bash', { command: 'pnpm test' }), 'desktop'), runningRow('b1')]) {
+    const [parent] = await parentsOfSvgs(element)
+    expect(parent?.props?.flexDirection).toBe('row')
+    expect(parent?.props?.width).toBeUndefined()
+  }
 })

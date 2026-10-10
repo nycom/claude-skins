@@ -62,8 +62,9 @@ const loopAtom = atom({ plugin: 'skins', key: 'loop' } as const, false)
 const toolLoopsAtom = atom({ plugin: 'skins', key: 'toolLoops' } as const, 0)
 
 // The animation budget: every looping image costs the desktop's main thread, so at most this
-// many of the skin's move at once. The spinner keeps one while a turn runs, the newest running
-// calls take up to TOOL_LOOPS, and the band's rings what is left; the rest are drawn held.
+// many of the skin's move at once. The spinner always keeps one (it can show between turns, as
+// for background tasks), the newest running calls take up to TOOL_LOOPS, and the band's rings
+// what is left; the rest are drawn held.
 const LOOP_BUDGET = 3
 const TOOL_LOOPS = 2
 
@@ -348,7 +349,9 @@ async function commit($: EngineInterface, state: DesignState): Promise<void> {
   await savePrefs($, state.prefs)
 }
 
-// The calls running now, oldest first.
+// The main loop's calls running now, oldest first. A new session starts with none.
+// ponytail: one list per plugin process, as the turn's stats are; per session if one process
+// ever hosts several at once.
 let running: readonly string[] = []
 
 // Which calls' icons move changes only as a call starts or ends, never on a redraw.
@@ -394,6 +397,8 @@ export const register: Register = on => {
     await refreshUsage($)
     await readConfig($, config)
     stopRelabel()
+    await setRunning($, [])
+    await update($, toolLoopsAtom, () => 0)
 
     // Only the spinner reads the frame, so a tick redraws the spinner and nothing else.
     ticker?.cancel()
@@ -473,13 +478,15 @@ export const register: Register = on => {
   // Times every call and counts the main loop's calls and changed lines.
   on('tool.call', async ($, e, next) => {
     const startedAt = await $.clock.now()
-    await setRunning($, [...running, e.tool_use_id])
-    const ran = await next(e).finally(() => setRunning($, running.filter(id => id !== e.tool_use_id)))
+    // A subagent's calls have no row on the main transcript, so they take no loop.
+    const isMain = e.agentId === undefined
+    if (isMain) await setRunning($, [...running, e.tool_use_id])
+    const ran = await next(e).finally(() => (isMain ? setRunning($, running.filter(id => id !== e.tool_use_id)) : undefined))
     const ms = (await $.clock.now()) - startedAt
 
     await update($, memberOf(durationAtom, { requestId: e.tool_use_id }), () => ms)
 
-    if (e.agentId === undefined && e.tool !== DESIGN && ran.deny === undefined) {
+    if (isMain && e.tool !== DESIGN && ran.deny === undefined) {
       const diff = diffstat(ran.result)
       stats = {
         tools: stats.tools + 1,
@@ -790,7 +797,7 @@ reply width: ${lastColumns} columns`
     }
 
     const starts = ramp(meters, now)
-    const ringLoops = Math.max(0, LOOP_BUDGET - (e.props.isWorking ? 1 : 0) - (await read($, toolLoopsAtom)))
+    const ringLoops = Math.max(0, LOOP_BUDGET - 1 - (await read($, toolLoopsAtom)))
     const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
     const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
