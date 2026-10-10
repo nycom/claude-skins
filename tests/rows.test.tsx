@@ -1200,6 +1200,46 @@ test('a band left on screen relabels its reset at midnight and drops it once the
   await band.unmount()
 })
 
+test('a session with no reading yet shows the last plan limits seen, a window past its reset as 0%', async ($, on) => {
+  // Friday noon; the 5h window reset at 11:00, the 7d one resets Monday.
+  const clock = mock.clock(on, { now: new Date(2026, 9, 9, 12, 0).getTime() })
+  let rateLimits: unknown[] = [
+    { kind: 'five_hour', percentUsed: 64, resetsAt: new Date(2026, 9, 9, 11, 0).toISOString() },
+    { kind: 'seven_day', percentUsed: 23, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() },
+  ]
+  on('session.cwd', () => ({ value: '/work' }))
+  mock.store(on)
+  on('ui.render', () => STOCK)
+  on('config.list', () => ({ value: [] }))
+  on('env.get', () => ({ value: undefined }))
+  on('classic.SessionStart', () => ({}))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 40 }, rateLimits: rateLimits as never } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const alt = async () => {
+    const band = await $.ui.mount(BAND('desktop', false))
+    const all = (await svgsOf(band)).map(svg => svg.alt).join(' | ')
+    await band.unmount()
+    return all
+  }
+
+  // A reply's reading is remembered.
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  // The next session, before its first reply, has none of its own.
+  rateLimits = []
+  await clock.advance(1000)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  expect(await alt()).toContain('context 40% | ')
+  expect(await alt()).toContain('5h 0%')
+  expect(await alt()).toContain('7d 23% | resets Mon 9:00am')
+
+  // /clear resets the band's state, so it reads the limits again.
+  rateLimits = [{ kind: 'five_hour', percentUsed: 30, resetsAt: new Date(2026, 9, 9, 16, 0).toISOString() }]
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(await alt()).toContain('5h 30% | resets 4:00pm')
+})
+
 test('the context ring chases faster in warn from 70% with Compact offered, and holds still under Reduce motion', async ($, on) => {
   mock.clock(on)
   let percent = 65
