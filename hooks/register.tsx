@@ -299,6 +299,23 @@ async function runFolderCommand($: EngineInterface, word: string): Promise<strin
   }
 }
 
+// A session has no plan limits until its first reply, but they are the account's, so until
+// then the band shows the last ones seen; a window past its reset has spent nothing since.
+async function knownLimits($: EngineInterface, live: UsageSnap['limits']): Promise<UsageSnap['limits']> {
+  if (live.length > 0) {
+    // Only a head start for the next session: failing to keep it must not stop this one.
+    await $.store.set('limits', live).catch(() => undefined)
+    return live
+  }
+
+  const stored = await $.store.get('limits')
+  const now = await $.clock.now()
+
+  return (Array.isArray(stored) ? (stored as UsageSnap['limits']) : []).map(limit =>
+    Date.parse(limit.resetsAt ?? '') <= now ? { label: limit.label, percent: 0 } : limit,
+  )
+}
+
 // The breakdown is the local estimate, which sends no requests, asked only while the band
 // draws; when it fails the band goes on without its bar.
 async function refreshUsage($: EngineInterface): Promise<void> {
@@ -308,7 +325,7 @@ async function refreshUsage($: EngineInterface): Promise<void> {
   const snap: UsageSnap = {
     context: usage.context.percent ?? null,
     window: usage.context.window,
-    limits: usage.rateLimits.map(limit => ({ label: limitLabel(limit.kind), percent: limit.percentUsed, resetsAt: limit.resetsAt })),
+    limits: await knownLimits($, usage.rateLimits.map(limit => ({ label: limitLabel(limit.kind), percent: limit.percentUsed, resetsAt: limit.resetsAt }))),
     ...(usage.context.tokens === undefined ? {} : { tokens: usage.context.tokens }),
     ...(Array.isArray(categories)
       ? { parts: categories.filter(category => category.kind === 'used').map(category => ({ name: category.name, tokens: category.tokens })) }
@@ -375,6 +392,7 @@ export const register: Register = on => {
   // /clear, /resume and /branch reset $.state to its defaults and skip session.start.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await load($)
+    await refreshUsage($)
     stopRelabel()
     await readConfig($, config)
 
