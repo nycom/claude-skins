@@ -10,12 +10,12 @@ import { cardWidth, CONTROL_SLOT, measure } from './svg-kit'
 
 // Spacing, in the desktop's units: a column is a code-font cell (about 8px), a row a line
 // of body text (about 20px); fractions are taken as they are.
-// A cell's padding each side, about 12px.
-export const PAD_X = 1.5
-// A body cell's padding above and below, about 6px.
-export const PAD_Y = 0.3
-// The header's, about 8px.
-export const HEAD_PAD_Y = 0.4
+// A cell's padding each side, about 16px.
+export const PAD_X = 2
+// A body cell's padding above and below, about 12px.
+export const PAD_Y = 0.6
+// The header's, about 12px.
+export const HEAD_PAD_Y = 0.6
 // Between the border and the bands on every side: none, so the bands span the card and its
 // rounded corners clip them.
 export const INSET = 0
