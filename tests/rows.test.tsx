@@ -164,7 +164,7 @@ test('a folded group is one node, an expanded one keeps its rows', async ($, on)
   expect(await expanded.find({ type: 'Text', text: 'stock row' })).toBeDefined()
 })
 
-test('a typed prompt sits in an outline sized to its text, other senders keep their row', async ($, on) => {
+test('a typed prompt sits in an outline sized to its text, other senders and the desktop keep their row', async ($, on) => {
   stubEngine(on)
 
   for (const surface of SURFACES) {
@@ -172,6 +172,14 @@ test('a typed prompt sits in an outline sized to its text, other senders keep th
       ({ ...SITE, surface, component: 'UserMessage', requestId: 'm1', props: { text: 'fix the build', origin: { kind }, isExpanded: false } }) as const
 
     const typed = await $.ui.mount(prompt('composer'))
+
+    // The desktop's own bubble carries its copy, rewind and fork buttons.
+    if (surface === 'desktop') {
+      expect(await typed.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+      await typed.unmount()
+      continue
+    }
+
     const column = (await typed.find({ type: 'Box' })) as { props: { alignItems?: string }; children?: readonly { props?: { borderStyle?: string } }[] } | undefined
     // The outline hugs the text: its column does not stretch it to the full width.
     expect(column?.props.alignItems).toBe('flex-start')

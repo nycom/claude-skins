@@ -639,10 +639,12 @@ reply width: ${lastColumns} columns`
       : next({ ...e, props: { ...e.props, output: { ...output, stdout } } })
   })
 
+  // The desktop keeps its own bubble: its copy, rewind and fork buttons live only on rows it
+  // draws, and a plugin frame around them is rebuilt on every redraw, so their hover flickers.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const active = await activeSkin($)
 
-    if (active === null || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT) {
+    if (active === null || e.surface === 'desktop' || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT) {
       return next(e)
     }
 
