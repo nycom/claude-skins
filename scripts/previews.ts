@@ -11,7 +11,6 @@ import type { Kind, Palette } from '../hooks/skin'
 import { codeSvg } from '../hooks/svg-code'
 import { diffSvg } from '../hooks/svg-diff'
 import { escape, FONT, MONO } from '../hooks/svg-kit'
-import { tableSvg } from '../hooks/svg-table'
 import { terminalSvg } from '../hooks/svg-terminal'
 import { partsOf, usageSvg } from '../hooks/svg-usage'
 import noir from '../hooks/themes/noir'
@@ -71,23 +70,6 @@ function hero(palette: Palette): string {
     WIDTH,
   )
   add(place(diff.source, 0, y), diff.height, 18)
-  add(text(0, y + 14, 'Every route is now limited per user:', palette.fg), 18, 10)
-
-  const table = tableSvg(
-    {
-      kind: 'table',
-      header: ['Route', 'Limit', 'Window', 'Store'],
-      align: ['left', 'right', 'left', 'left'],
-      rows: [
-        ['/chat', '60', '1 min', 'memory'],
-        ['/upload', '10', '1 min', 'SQLite'],
-        ['/search', '120', '5 min', 'memory'],
-      ],
-    },
-    palette,
-    WIDTH,
-  )
-  add(place(table.source, 0, y), table.height, 18)
   add(place(spinnerIcon('responding', palette.user), 0, y - 2) + text(28, y + 13, 'Writing the reply', palette.muted), 18, 4)
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${y}" viewBox="0 0 ${WIDTH} ${y}">${parts.join('')}</svg>`

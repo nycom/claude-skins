@@ -4,12 +4,12 @@ import { DEFAULT_PREFS, parsePrefs, runSkinCommand } from '../hooks/command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from '../hooks/custom'
 import { runDesign } from '../hooks/designer'
 import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
-import { columnWidths, cutCell, padCell, splitReply, widthOf } from '../hooks/markdown'
+import { columnWidths, cutCell, padCell, plainTable, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
 import { holdStill, MAX_ALT } from '../hooks/svg-kit'
 import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
-import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
+import { fitColumns } from '../hooks/table-card'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
 import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
 import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
@@ -94,10 +94,17 @@ test('tables and closed code fences are split out of a reply, and a fence keeps 
     header: ['Route', 'Limit'],
     align: ['left', 'right'],
     rows: [
-      ['/chat', '60'],
+      ['/chat', '**60**'],
       ['/up', '10'],
     ],
   })
+})
+
+test('a table keeps its cells\u2019 markdown as written, escaped pipes too; the terminal\u2019s plain grid drops the marks', async () => {
+  const [table] = splitReply('| `a` \\| b | **c** |\n|---|---|\n| [x](https://x.dev) | __y__ |')
+
+  expect(table).toEqual({ kind: 'table', header: ['`a` \\| b', '**c**'], align: ['left', 'left'], rows: [['[x](https://x.dev)', '__y__']] })
+  expect(table?.kind === 'table' && plainTable(table)).toEqual({ kind: 'table', header: ['a | b', 'c'], align: ['left', 'left'], rows: [['[x](https://x.dev)', 'y']] })
 })
 
 test('columns narrow from the widest until the table fits, and cells pad to their side', async () => {
@@ -178,43 +185,6 @@ test('stored prefs that are stale or hand-edited fall back to defaults', async (
   expect(parsePrefs(undefined, NAMES)).toEqual(DEFAULT_PREFS)
   expect(parsePrefs({ skin: 'gone', icons: 'x', rail: 'yes' }, NAMES)).toEqual(DEFAULT_PREFS)
   expect(parsePrefs({ skin: 'off', rail: false }, NAMES).rail).toBe(false)
-})
-
-test('cells are read as colours, diffs, numbers, code or text', async () => {
-  expect(kindOfCell('#7aa2f7')).toBe('colour')
-  expect(kindOfCell('+18 −3')).toBe('diff')
-  expect(kindOfCell('120')).toBe('number')
-  expect(kindOfCell('2.1s')).toBe('number')
-  expect(kindOfCell('apps/hub/server.ts')).toBe('code')
-  expect(kindOfCell('Added a limiter')).toBe('text')
-  expect(measure('MMMM', false)).toBeDefined()
-})
-
-test('a vector table stays within its width and escapes what it draws', async () => {
-  const card = tableSvg(
-    { kind: 'table', header: ['a', 'b'], align: ['left', 'right'], rows: [['<b>', 'Q'.repeat(400)]] },
-    tokyoNight.palette,
-    5000,
-  )
-
-  expect(card.width).toBe(1600)
-  expect(tableSvg({ kind: 'table', header: ['a'], align: ['left'], rows: [['b']] }, tokyoNight.palette, 700).width).toBe(700)
-  // A long cell wraps instead of being cut: every one of its 400 characters is drawn.
-  expect(card.source).not.toContain('…')
-  expect((card.source.match(/Q+/g) ?? []).join('').length).toBe(400)
-  expect(card.source).toContain('&lt;b&gt;')
-  expect(card.source).not.toContain('<b>')
-  expect(card.source).toContain('prefers-reduced-motion')
-})
-
-test('a long table rises in within a quarter second, its rows visible without the animation', async () => {
-  const rows = Array.from({ length: 40 }, (_, i) => [`row ${i}`])
-  const card = tableSvg({ kind: 'table', header: ['a'], align: ['left'], rows }, tokyoNight.palette, 700)
-  const delays = [...card.source.matchAll(/animation-delay:(\d+)ms/g)].map(match => Number(match[1]))
-
-  expect(delays.length).toBe(40)
-  expect(Math.max(...delays) - Math.min(...delays)).toBeLessThanOrEqual(250)
-  expect(card.source).not.toContain('.row{opacity:0')
 })
 
 test('a copied patch names the file relative to the session, or by its absolute path outside it', async () => {
@@ -563,39 +533,22 @@ test('a running arc and every spinner carry on mid-cycle when drawn again; a sti
   expect(toolIcon('run', '#fff', false, 'failed', t)).toBe(toolIcon('run', '#fff', false, 'failed'))
 })
 
-test('a long cell wraps on its words, breaks a word too long for the column, and keeps every word', async () => {
-  expect(wrapCell('the quick brown fox jumps', 90, false)).toEqual(['the quick', 'brown fox', 'jumps'])
-  expect(wrapCell('x'.repeat(30), 60, true).every(line => measure(line, true) <= 60)).toBe(true)
-  expect(wrapCell('word '.repeat(80), 60, false).join(' ')).toBe('word '.repeat(80).trim())
-})
-
 test('short columns keep their width and long ones share the rest', async () => {
   const [hash, why, who] = fitColumns([20, 900, 60], 700)
 
   expect(hash).toBe(20)
   expect(who).toBe(60)
-  expect(Math.round((why ?? 0) + 20 + 60 + 2 * 28 + 2 * 24)).toBe(700)
+  expect(Math.round((why ?? 0) + 20 + 60)).toBe(700)
 })
 
 test('a column is never narrower than its longest word while the table has room, the widest columns giving way', async () => {
-  const long = 'the unit restarts it on failure with a five second backoff, which held when the process was killed twice'
-  const card = tableSvg(
-    { kind: 'table', header: ['Directory marketplaces', 'What', 'Why'], align: ['left', 'left', 'left'], rows: [['Directory marketplaces', long, `${long} ${long}`]] },
-    tokyoNight.palette,
-    600,
-  )
-  const lines = [...card.source.matchAll(/>([^<>]+)</g)].map(m => m[1])
-
-  for (const word of ['DIRECTORY', 'MARKETPLACES', 'Directory', 'marketplaces']) {
-    expect(lines.some(line => line?.split(' ').includes(word))).toBe(true)
-  }
   // Two short columns are raised to their words; the wide one gives up the width.
   const [first, second, third] = fitColumns([300, 40, 900], 600, [150, 40, 80])
   expect(first).toBeGreaterThanOrEqual(150)
   expect(second).toBe(40)
-  expect(Math.round((first ?? 0) + (second ?? 0) + (third ?? 0))).toBe(600 - 2 * 28 - 2 * 24)
+  expect(Math.round((first ?? 0) + (second ?? 0) + (third ?? 0))).toBe(600)
   // A word wider than the whole table still breaks.
-  expect(fitColumns([2000], 600, [2000])).toEqual([552])
+  expect(fitColumns([2000], 600, [2000])).toEqual([600])
 })
 
 test('a light palette is derived with dark text, light bands and deepened colours', async () => {

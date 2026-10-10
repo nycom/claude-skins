@@ -148,9 +148,8 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
 const drawKey = (e: { surface: RenderSurface; requestId?: string | undefined }): string | undefined =>
   e.requestId === undefined ? undefined : `${e.surface}:${e.requestId}`
 
-// Each reply's segments as last drawn. A redraw holds the reply still, but a table that
-// only gained rows, as one does while its reply streams, lets the new rows rise in.
-// ponytail: keeps every reply with a table for the session; a reload clears it.
+// Each reply's segments as last drawn: a redraw holds its cards still.
+// ponytail: keeps every reply with a card for the session; a reload clears it.
 const shown = new Map<string, readonly Segment[]>()
 // The cards each surface has drawn, a reply's by what they hold, a tool's by its call: one
 // mounted again under a new request, as one scrolled back into view may be, draws still.
@@ -163,11 +162,14 @@ const sawToolCard = (e: { surface: RenderSurface; props: { tool_use_id: string }
   seenCards.add(card)
   return seen
 }
+// A table is no image, so only a reply's code cards are remembered.
 const cardsOf = (surface: RenderSurface, segments: readonly Segment[]): string[] =>
-  segments.filter(segment => segment.kind !== 'text').map(segment => `${surface}:${JSON.stringify(segment)}`)
-const freshRows = (e: { surface: RenderSurface; requestId?: string | undefined }, segments: readonly Segment[]): (number | undefined)[] | undefined => {
+  segments.filter(segment => segment.kind === 'code').map(segment => `${surface}:${JSON.stringify(segment)}`)
+// True when the reply's cards were drawn before: a redraw of the same reply, or the same
+// cards under a new request.
+const sawReplyCards = (e: { surface: RenderSurface; requestId?: string | undefined }, segments: readonly Segment[]): boolean => {
   const key = drawKey(e)
-  if (key === undefined) return undefined
+  if (key === undefined) return false
   const last = shown.get(key)
   shown.set(key, segments)
   // A streaming reply's earlier draws are not cards anyone scrolls back to.
@@ -175,20 +177,7 @@ const freshRows = (e: { surface: RenderSurface; requestId?: string | undefined }
   const cards = cardsOf(e.surface, segments)
   const isSeen = cards.every(card => seenCards.has(card))
   for (const card of cards) seenCards.add(card)
-  if (last === undefined) return isSeen ? [] : undefined
-
-  // A table is matched to the one at its own place among the reply's tables, so text or code
-  // arriving ahead of it, which moves it to a later segment, does not make it new.
-  const priorTables = last.filter(segment => segment.kind === 'table')
-  let nth = 0
-  return segments.map(segment => {
-    if (segment.kind !== 'table') return undefined
-    const prior = priorTables[nth++]
-    const before = prior?.kind === 'table' ? prior.rows : []
-    // The last row may have been drawn half-written and finished since, so it may differ.
-    const kept = before.slice(0, -1).every((row, r) => row.join('\n') === segment.rows[r]?.join('\n'))
-    return segment.rows.length > before.length && kept ? before.length : undefined
-  })
+  return last !== undefined || isSeen
 }
 
 // The band's rings grow from their last reading (see rampFrom); once they have grown, one
@@ -679,15 +668,16 @@ reply width: ${lastColumns} columns`
     }
 
     const svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    // Only a vector card animates, so only its draws are remembered.
-    const fresh = svg === undefined ? undefined : freshRows(e, segments)
+    // Only a code card animates, so only a reply with one is remembered and settles.
+    const hasCard = svg !== undefined && segments.some(segment => segment.kind === 'code')
+    const seen = hasCard && sawReplyCards(e, segments)
 
-    if (svg !== undefined) {
+    if (hasCard) {
       await read($, memberOf(settledAtom, e))
-      if (fresh === undefined || fresh.some(row => row !== undefined)) settleReply($, e)
+      if (!seen) settleReply($, e)
     }
 
-    return drawOnce(fresh !== undefined, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg, fresh))
+    return drawOnce(seen, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg))
   })
 
   // The terminal's spinner gets the skin's word with a shimmer; the desktop's keeps its

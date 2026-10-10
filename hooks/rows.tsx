@@ -2,7 +2,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, TurnStats } from '../types'
 import { formatDuration, formatMs } from './format'
-import { columnWidths, cutCell, LINK, widthOf } from './markdown'
+import { columnWidths, cutCell, plainTable, widthOf } from './markdown'
 import type { Segment, Table } from './markdown'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
@@ -11,7 +11,7 @@ import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
 import { PX_PER_COLUMN, cardWidth } from './svg-kit'
-import { tableSvg } from './svg-table'
+import { JUSTIFY, tableCard } from './table-card'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
 import { COMPACT_NUDGE, COMPACT_SHOW, partCells, usageLine, usageSvg } from './svg-usage'
@@ -264,8 +264,6 @@ export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text
   )
 }
 
-const JUSTIFY = { left: 'flex-start', right: 'flex-end', center: 'center' } as const
-
 // The share of the reported width a table may take at its natural size. Past it, the
 // table spans its container and splits it between columns in proportion: the desktop
 // app reports the window's width, wider than the transcript column a reply sits in.
@@ -346,28 +344,6 @@ function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt:
   )
 }
 
-// A table card, its Copy button over the header row's right end and its links under it:
-// the image cannot be pressed, so its links are pressed here.
-function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string, fresh?: number) {
-  const { Box, Link } = look.ui
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), fresh, look.copy !== undefined)
-  const links = new Map(table.rows.flat().flatMap(cell => [...cell.matchAll(LINK)].map(([, label = '', href = '']) => [href, label] as const)))
-
-  return (
-    <Box flexDirection="column" marginY={1} alignSelf="flex-start">
-      <Box alignSelf="flex-start">
-        <Svg source={card.source} alt={card.alt} width={card.width} height={card.height} />
-        {copyOverlay(look, key, tableMarkdown(table))}
-      </Box>
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {[...links].map(([href, label]) => (
-          <Link href={href} label={label} />
-        ))}
-      </Box>
-    </Box>
-  )
-}
-
 // A table as markdown again, for the clipboard.
 const tableMarkdown = (table: Table): string =>
   [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
@@ -396,8 +372,7 @@ export function copyRow(look: Look, key: string, text: string) {
   )
 }
 
-// `fresh` holds, per segment, the first table row new since the reply's last draw.
-export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, fresh: readonly (number | undefined)[] = []) {
+export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement) {
   const { Box, Markdown } = look.ui
 
   return (
@@ -418,11 +393,9 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
           )
         }
 
-        return Svg === undefined ? (
-          tableRows(look, segment, maxWidth, copyButton(look, `copy-${i}`, tableMarkdown(segment)))
-        ) : (
-          tableCard(look, segment, Svg, maxWidth, `copy-${i}`, fresh[i])
-        )
+        const control = copyButton(look, `copy-${i}`, tableMarkdown(segment))
+
+        return Svg === undefined ? tableRows(look, plainTable(segment), maxWidth, control) : tableCard(look, segment, maxWidth, control)
       })}
     </Box>
   )
