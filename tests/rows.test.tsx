@@ -4,7 +4,6 @@ import type { Engine } from 'claude-code/testing'
 
 import { widthOf } from '../hooks/markdown'
 import { CONTROL_SLOT, measure, PX_PER_COLUMN } from '../hooks/svg-kit'
-import { codeSvg } from '../hooks/svg-code'
 import { HEAD_PAD_Y, INSET, PAD_X, PAD_Y } from '../hooks/table-card'
 import noir from '../hooks/themes/noir'
 import tokyoNight from '../hooks/themes/tokyo-night'
@@ -406,19 +405,27 @@ test('on the desktop an edit is a diff card and a shell command a terminal card'
   expect(await terminal.find({ type: 'Text', text: 'stock row' })).toBeDefined()
 })
 
-test('a code fence is a card on the desktop and stays markdown in the terminal', async ($, on) => {
+test('a code fence keeps Claude Code\'s own drawing, beside a table too, on every surface', async ($, on) => {
+  // What Claude Code is handed to draw, answered as it would be.
+  const drawn: string[] = []
+  on('ui.render', { component: 'AssistantMessage' }, ($, e) => (drawn.push(e.props.text), STOCK))
   stubEngine(on)
 
-  const reply = (surface: (typeof SURFACES)[number]) =>
-    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'c1', props: { text: 'Run:\n\n```ts\nconst a = 1\n```', isFirstOfReply: true } }) as const
+  for (const surface of SURFACES) {
+    const reply = (text: string) => ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'c1', props: { text, isFirstOfReply: true } }) as const
 
-  const desktop = await $.ui.mount(reply('desktop'))
-  expect(((await desktop.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source).toContain('const')
-  await desktop.unmount()
+    const alone = await $.ui.mount(reply('Run:\n\n```bash\nls\n```'))
+    expect(await alone.find({ type: 'Svg' })).toBeUndefined()
+    expect(await alone.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+    await alone.unmount()
 
-  const terminal = await $.ui.mount(reply('terminal'))
-  expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
-  expect(await terminal.find({ type: 'Markdown' })).toBeDefined()
+    // Beside a table the reply is the skin's, and the block alone is handed back to be drawn.
+    drawn.length = 0
+    const mixed = await $.ui.mount(reply('| A | B |\n|---|---|\n| 1 | 2 |\n\n```bash\nls\n```'))
+    expect(drawn).toContain('```bash\nls\n```')
+    expect(await mixed.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+    await mixed.unmount()
+  }
 })
 
 const BAND = (surface: (typeof SURFACES)[number], isWorking: boolean, bodyColumns = 100) =>
@@ -571,7 +578,7 @@ test('/skin gallery opens a pane with every element, numbered, on both surfaces'
     const ui = await $.ui.mount({ ...PANE, requestId: 'skins-gallery', surface })
 
     expect(await ui.find({ type: 'Text', text: /^1  Your prompt/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^11  Turn footer/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^10  Turn footer/ })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -589,7 +596,7 @@ test('on a light Claude Code theme the skin draws dark text for a light backgrou
   expect(spanColor(await row.find({ type: 'Text', text: /Bash/ }), 'Bash')).toBe('#111111')
 })
 
-test('code blocks, tables and shell output get a Copy button that copies their text', async ($, on) => {
+test('tables and shell output get a Copy button that copies their text', async ($, on) => {
   stubEngine(on)
   const copied: string[] = []
   on('ui.copy', ($, e) => {
@@ -601,7 +608,6 @@ test('code blocks, tables and shell output get a Copy button that copies their t
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...SITE, surface, component: 'AssistantMessage', requestId: `cp-${surface}`, props: { text, isFirstOfReply: true } })
-    await ui.press({ key: 'copy-1' })
     await ui.press({ key: 'copy-2' })
     await ui.unmount()
   }
@@ -615,7 +621,7 @@ test('code blocks, tables and shell output get a Copy button that copies their t
   })
   await shell.press({ key: 'copy-output' })
 
-  expect(copied).toEqual(['const a = 1', '| A | B |\n| --- | --- |\n| 1 | 2 |', 'const a = 1', '| A | B |\n| --- | --- |\n| 1 | 2 |', 'built ok'])
+  expect(copied).toEqual(['| A | B |\n| --- | --- |\n| 1 | 2 |', '| A | B |\n| --- | --- |\n| 1 | 2 |', 'built ok'])
 })
 
 test('on the desktop the Copy button is laid over the card, in the corner the card leaves free', async ($, on) => {
@@ -625,13 +631,12 @@ test('on the desktop the Copy button is laid over the card, in the corner the ca
   const ui = await $.ui.mount({
     ...SITE,
     surface: 'desktop',
-    component: 'AssistantMessage',
+    component: 'ToolResult',
     requestId: 'ov',
-    props: { text: '```ts\nconst a = 1\n```', isFirstOfReply: true },
+    props: { tool_use_id: 'ov', tool: 'Bash', output: { stdout: 'built ok', stderr: '', interrupted: false }, isErrored: false },
   })
   type Node = { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
-  const reply = (await ui.find({ type: 'Box' })) as Node
-  const card = reply.children?.[0]
+  const card = (await ui.find({ type: 'Box' })) as Node
   const overlay = card?.children?.[1]
 
   expect(card?.props?.alignSelf).toBe('flex-start')
@@ -804,29 +809,12 @@ test('a card animates on its first draw only: a redraw of the same row holds sti
   const held = '*{animation:none!important}</style>'
 
   const shell = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'ToolResult', requestId: 'once-sh', props: { tool_use_id: 'once-sh', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false } })
-  const code = await $.ui.mount({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId: 'once-tb', props: { text: '```ts\nconst a = 1\n```' } as never })
   expect(await sourceOf(shell)).not.toContain(held)
-  expect(await sourceOf(code)).not.toContain(held)
 
-  // Any write the cards read (here a theme switch) draws them again: the rows must not rise in a second time.
+  // Any write the card reads (here a theme switch) draws it again: the rows must not rise in a second time.
   await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { kind: 'engine' }, origin: { kind: 'composer' } } as never)
   expect(await sourceOf(shell)).toContain(held)
-  expect(await sourceOf(code)).toContain(held)
   await shell.unmount()
-  await code.unmount()
-})
-
-test('the terminal drawing a reply first does not hold the desktop’s first card still', async ($, on) => {
-  stubEngine(on)
-  const reply = (surface: (typeof SURFACES)[number]) =>
-    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'both-tb', props: { text: '```ts\nconst a = 1\n```' } as never }) as const
-
-  await (await $.ui.mount(reply('terminal'))).unmount()
-  const desktop = await $.ui.mount(reply('desktop'))
-  const source = ((await desktop.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
-  expect(source).toContain('<svg')
-  expect(source).not.toContain('*{animation:none!important}</style>')
-  await desktop.unmount()
 })
 
 test('each surface remembers its own card draws: desktop, mobile, desktop animates, animates, holds', async ($, on) => {
@@ -836,18 +824,14 @@ test('each surface remembers its own card draws: desktop, mobile, desktop animat
   const held = '*{animation:none!important}</style>'
   const shell = (surface: 'desktop' | 'mobile') =>
     ({ ...SITE, surface, component: 'ToolResult', requestId: 'surf-sh', props: { tool_use_id: 'surf-sh', tool: 'Bash', output: { stdout: 'built', stderr: '', interrupted: false }, isErrored: false } }) as const
-  const table = (surface: 'desktop' | 'mobile') =>
-    ({ ...SITE, surface, component: 'AssistantMessage', requestId: 'surf-tb', props: { text: '```ts\nconst a = 1\n```' } as never }) as const
+  const states: boolean[] = []
 
-  for (const make of [shell, table]) {
-    const states: boolean[] = []
-    for (const surface of ['desktop', 'mobile', 'desktop'] as const) {
-      const ui = await $.ui.mount(make(surface))
-      states.push((await sourceOf(ui)).includes(held))
-      await ui.unmount()
-    }
-    expect(states).toEqual([false, false, true])
+  for (const surface of ['desktop', 'mobile', 'desktop'] as const) {
+    const ui = await $.ui.mount(shell(surface))
+    states.push((await sourceOf(ui)).includes(held))
+    await ui.unmount()
   }
+  expect(states).toEqual([false, false, true])
 })
 
 const desktopReply = (requestId: string, text: string) =>
@@ -901,13 +885,6 @@ test('a desktop table card keeps Copy inside its header row, after the last head
   await ui.press({ key: 'copy-0' })
   expect(copied).toEqual(['| Client | Where |\n| --- | --- |\n| Robot | Pi |'])
   await ui.unmount()
-})
-
-test('code cards keep only an icon-sized corner free for Copy', async () => {
-  const card = codeSvg('const a = 1', 'ts', tokyoNight.palette, 600, true)
-
-  expect(CONTROL_SLOT).toBeLessThanOrEqual(48)
-  expect(card.source).toContain(`<text x="${600 - 16 - CONTROL_SLOT}"`)
 })
 
 test('a desktop table card copies with a dim one-glyph icon, ascii icons too: its slot fits one glyph', async ($, on) => {
@@ -1019,31 +996,6 @@ test('a desktop table is drawn once: it sets no settle timer and never holds a r
   await clock.advance(1500)
   expect(settles).toEqual([])
   await table.unmount()
-
-  // A code card in the same place still settles.
-  const code = await $.ui.mount(desktopReply('quiet-cd', '```ts\nconst a = 1\n```'))
-  await clock.advance(1500)
-  expect(settles).toHaveLength(1)
-  await code.unmount()
-})
-
-test('a code card scrolled back into view does not rise in again, whatever request draws it', async ($, on) => {
-  const clock = stubEngine(on)
-  const text = '```ts\nconst a = 1\n```'
-  const held = '*{animation:none!important}</style>'
-
-  // The engine keeps a drawing's answer and replays it when the row mounts again: once its
-  // rows have risen, the answer it keeps must be the still one.
-  const first = await $.ui.mount(desktopReply('scroll-a', text))
-  expect((await svgOf(first)).source).not.toContain(held)
-  await clock.advance(1500)
-  expect((await svgOf(first)).source).toContain(held)
-  await first.unmount()
-
-  // A mount under a new request id draws the same card, already seen, still.
-  const again = await $.ui.mount(desktopReply('scroll-b', text))
-  expect((await svgOf(again)).source).toContain(held)
-  await again.unmount()
 })
 
 test('a diff or terminal card scrolled back into view does not rise in again, whatever request draws it', async ($, on) => {

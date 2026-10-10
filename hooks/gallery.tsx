@@ -3,7 +3,6 @@ import type { RenderElement } from 'claude-code'
 import type { Table } from './markdown'
 import {
   askBand,
-  codeCard,
   desktopSpinnerRow,
   diffCard,
   footerRow,
@@ -33,7 +32,6 @@ const TABLE: Table = {
   ],
 }
 
-const CODE = ['// Rate limit per route, keyed by user', 'export function limit(route: string, perMinute = 60) {', '  return (used: number) => used < perMinute', '}'].join('\n')
 
 const DIFF = {
   path: '/work/apps/hub/src/server.ts',
@@ -78,9 +76,6 @@ export function galleryPane(look: Look, columns: number) {
             terminalCard(look, svg, { stdout: 'Test Files  12 passed (12)\n     Tests  148 passed (148)', stderr: '', interrupted: false }, false, width),
             terminalCard(look, svg, { stdout: '', stderr: 'error TS2322: Type string is not assignable to number', interrupted: false }, true, width),
           )}
-      {svg === undefined
-        ? section('Code block card', <Text color={palette.muted}>Desktop only; the terminal keeps Claude Code's markdown.</Text>)
-        : section('Code block card', codeCard(look, 'ts', CODE, svg, width))}
       {section('Table', replyRows(look, [TABLE], width, svg))}
       {svg === undefined
         ? section('Spinner', spinnerRow(look, look.skin.spinner[0] ?? 'Working', 3, 12_000))
