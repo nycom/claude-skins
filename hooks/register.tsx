@@ -10,7 +10,6 @@ import { DESIGN_TOOL, runDesign } from './designer'
 import type { DesignState } from './designer'
 import { clipLines, diffstat, pick } from './format'
 import { splitReply } from './markdown'
-import type { Segment } from './markdown'
 import { askBand, desktopSpinnerRow, diffCard, footerRow, terminalCard, usageBand, groupRow, promptRow, replyRows, spinnerRow, toolRow } from './rows'
 import type { ClientElement, Look, SvgElement, Ui } from './rows'
 import { galleryPane } from './gallery'
@@ -141,16 +140,8 @@ async function refreshTheme($: EngineInterface): Promise<{ followsSystem: boolea
   return { followsSystem: needsSystem, reducesMotion: rows.find(row => row.key === 'reduceMotion')?.value === true }
 }
 
-// A row as one surface draws it: every attached surface runs the hook on its own, so one
-// surface's draw says nothing about another's.
-const drawKey = (e: { surface: RenderSurface; requestId?: string | undefined }): string | undefined =>
-  e.requestId === undefined ? undefined : `${e.surface}:${e.requestId}`
-
-// Each reply's segments as last drawn: a redraw holds its cards still.
-// ponytail: keeps every reply with a card for the session; a reload clears it.
-const shown = new Map<string, readonly Segment[]>()
-// The cards each surface has drawn, a reply's by what they hold, a tool's by its call: one
-// mounted again under a new request, as one scrolled back into view may be, draws still.
+// The cards each surface has drawn, a tool's by its call: one mounted again under a new
+// request, as one scrolled back into view may be, draws still.
 // ponytail: one entry per card shown for the session; a reload clears it.
 const seenCards = new Set<string>()
 // A tool's card is known by its call and kind, whatever request draws it; true once drawn.
@@ -160,24 +151,6 @@ const sawToolCard = (e: { surface: RenderSurface; props: { tool_use_id: string }
   seenCards.add(card)
   return seen
 }
-// A table is no image, so only a reply's code cards are remembered.
-const cardsOf = (surface: RenderSurface, segments: readonly Segment[]): string[] =>
-  segments.filter(segment => segment.kind === 'code').map(segment => `${surface}:${JSON.stringify(segment)}`)
-// True when the reply's cards were drawn before: a redraw of the same reply, or the same
-// cards under a new request.
-const sawReplyCards = (e: { surface: RenderSurface; requestId?: string | undefined }, segments: readonly Segment[]): boolean => {
-  const key = drawKey(e)
-  if (key === undefined) return false
-  const last = shown.get(key)
-  shown.set(key, segments)
-  // A streaming reply's earlier draws are not cards anyone scrolls back to.
-  for (const card of cardsOf(e.surface, last ?? [])) seenCards.delete(card)
-  const cards = cardsOf(e.surface, segments)
-  const isSeen = cards.every(card => seenCards.has(card))
-  for (const card of cards) seenCards.add(card)
-  return last !== undefined || isSeen
-}
-
 // The band's rings grow from their last reading (see rampFrom); once they have grown, one
 // more draw settles them.
 const ramp = rampFrom()
@@ -653,20 +626,21 @@ reply width: ${lastColumns} columns`
     return promptRow(look, e.props.text, hasImages ? await next({ ...e, props: { ...e.props, text: '' } }) : undefined)
   })
 
-  // A reply keeps Claude Code's own drawing unless it holds a table to draw.
+  // A reply keeps Claude Code's own drawing unless it holds a table to draw. Its code blocks
+  // stay Claude Code's even then, with their own copy and run buttons.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const active = await activeSkin($)
 
     const text = e.props.text
 
-    if (active === null || !active.prefs.tables || !/\||```|~~~/.test(text)) {
+    if (active === null || !active.prefs.tables || !text.includes('|')) {
       return next(e)
     }
 
     const segments = splitReply(text)
     const fits = segments.every(segment => segment.kind === 'table' || (segment.kind === 'text' ? segment.text : segment.raw).length <= MAX_MARKDOWN)
 
-    if (!fits || !segments.some(segment => segment.kind !== 'text')) {
+    if (!fits || !segments.some(segment => segment.kind === 'table')) {
       return next(e)
     }
 
@@ -676,18 +650,12 @@ reply width: ${lastColumns} columns`
     const copy = (copied: string) => {
       void $.ui.copy({ text: copied, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
     }
-
     const svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    // Only a code card animates, so only a reply with one is remembered and settles.
-    const hasCard = svg !== undefined && segments.some(segment => segment.kind === 'code')
-    const seen = hasCard && sawReplyCards(e, segments)
+    const code = await Promise.all(
+      segments.map(segment => (segment.kind === 'code' ? next({ ...e, props: { ...e.props, text: segment.raw } }) : undefined)),
+    )
 
-    if (hasCard) {
-      await read($, memberOf(settledAtom, e))
-      if (!seen) settleReply($, e)
-    }
-
-    return drawOnce(seen, () => replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg))
+    return replyRows(lookOf(ui, active, e.surface, copy), segments, e.viewport?.columns ?? 100, svg, code)
   })
 
   // The terminal's spinner gets the skin's word with a shimmer; the desktop's keeps its

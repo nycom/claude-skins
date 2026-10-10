@@ -9,7 +9,6 @@ import type { Icons, Kind, Skin } from './skin'
 import { spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
 import type { LoopProps } from './anim'
-import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
 import { PX_PER_COLUMN, cardWidth, isLooping } from './svg-kit'
@@ -407,7 +406,9 @@ export function copyRow(look: Look, key: string, text: string) {
   )
 }
 
-export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement) {
+// `code` holds Claude Code's own drawing of each code segment, by index, with its copy and
+// run buttons; without it a block is the surface's markdown.
+export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, code: readonly unknown[] = []) {
   const { Box, Markdown } = look.ui
   // The desktop refuses a whole reply past its element limit, so native grids share a
   // budget in reply order; a table past it, or too wide to split, stays the surface's markdown.
@@ -421,14 +422,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
         }
 
         if (segment.kind === 'code') {
-          return Svg === undefined ? (
-            <Box flexDirection="column">
-              <Markdown text={segment.raw} />
-              {copyRow(look, `copy-${i}`, segment.code)}
-            </Box>
-          ) : (
-            codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`)
-          )
+          return (code[i] as ReturnType<Ui['Text']> | undefined) ?? <Markdown text={segment.raw} />
         }
 
         const markdown = tableMarkdown(segment)
@@ -527,10 +521,6 @@ export function askBand(look: Look, headers: readonly string[]) {
       ))}
     </Text>
   )
-}
-
-export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code') {
-  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code)
 }
 
 // The card shows the first lines; Copy gives the whole patch.

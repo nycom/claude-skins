@@ -5,7 +5,6 @@ import { buildCustom, resolveSkin, skinNames, withSlot } from '../hooks/custom'
 import { runDesign } from '../hooks/designer'
 import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, plainTable, splitReply, widthOf } from '../hooks/markdown'
-import { codeSvg, tokenize } from '../hooks/svg-code'
 import { holdStill, isLooping, MAX_ALT, measure } from '../hooks/svg-kit'
 import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
@@ -215,10 +214,8 @@ test('a changed line draws its numbers and sign in the text colour, readable on 
 test('a huge new file still draws at once, its alt capped in characters', async () => {
   const lines = Array.from({ length: 2000 }, (_, i) => `+const line${i} = '${'x'.repeat(60)}'`)
   const card = diffSvg({ path: 'big.ts', hunks: [{ oldStart: 0, newStart: 1, lines }], isNewFile: true }, 'big.ts', tokyoNight.palette, 800)
-  const code = codeSvg(lines.join('\n').repeat(4), 'ts', tokyoNight.palette, 800)
 
   expect(card.alt.length).toBeLessThanOrEqual('big.ts: +2000 −0\n'.length + MAX_ALT + 1)
-  expect(code.alt.length).toBeLessThanOrEqual('ts:\n'.length + MAX_ALT + 1)
   expect(card.alt.length).toBeGreaterThan(MAX_ALT)
 })
 
@@ -262,14 +259,6 @@ test('shell output loses its colour codes, keeps stderr apart and folds the midd
   expect(lines.at(-1)).toEqual({ text: 'warn: x', isErr: true })
   expect(terminalSvg(shell!, true, tokyoNight.palette, 600).source).toContain('failed')
   expect(shellOutputOf({ content: 'x' })).toBeNull()
-})
-
-test('code is split into comments, strings, numbers and keywords by language', async () => {
-  expect(tokenize('const x = "hi" // note', 'ts').map(token => token.role)).toEqual([
-    'keyword', 'plain', 'plain', 'plain', 'string', 'plain', 'comment',
-  ])
-  expect(tokenize('x = 1  # note', 'python').at(-1)).toEqual({ text: '# note', role: 'comment' })
-  expect(codeSvg('a\nb', 'ts', tokyoNight.palette, 600).source).toContain('TS')
 })
 
 // Every image of a band, in order, as one string.

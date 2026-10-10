@@ -1,8 +1,8 @@
 # claude-skins
 
 A modern skin for Claude Code. A [mod](https://code.claude.com/docs/en/plugins/mods/overview) that
-redraws the transcript: tool calls with icons and timings, edits as diff cards, tables and code as
-animated cards, shell output in a terminal card, a spinner that shows what Claude is doing, and a band
+redraws the transcript: tool calls with icons and timings, edits as diff cards, tables as
+cards, shell output in a terminal card, a spinner that shows what Claude is doing, and a band
 above the prompt with your context and plan limits and, from 50% context, a Compact button. Seven skins, light and dark,
 a settings page, and your own agent can design a new skin with you.
 
@@ -21,11 +21,6 @@ a settings page, and your own agent can design a new skin with you.
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/previews/terminal-light.svg">
   <img alt="Shell output in a terminal card" src="docs/previews/terminal-dark.svg">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/previews/code-light.svg">
-  <img alt="A code block as a card with line numbers" src="docs/previews/code-dark.svg">
 </picture>
 
 <picture>
@@ -59,7 +54,7 @@ Or take it with the rest of the set (savvy-progress, filetree, cache-tax) from o
 | Edits | A diff card: file, `+N −M`, the first lines changed, numbered, in green and red, and a copy button for the whole patch; the alt text carries the patch too, capped at 4000 characters, with paths relative to the session (`a/` and `b/`) | Claude Code's own diff |
 | Shell commands | A terminal card: status pill, output with stderr apart, long output folded, and a copy button for the output | Claude Code's own output |
 | Tables in replies | A rounded card of real text, not an image: a header band in muted capitals, zebra rows, each cell drawn as markdown so links click, text selects and inline code and bold show as in a reply, long cells wrapped in full, a column never narrower than its longest word; a copy button in its top-right corner, which gives the markdown. A table of more than 12 columns, or one that would take a reply's grids past 1500 elements (the app refuses a reply of more than 2000), stays markdown, with a copy button under it | A cell grid with a header band and zebra rows, and the same copy button |
-| Code blocks in replies | A card with the language, line numbers and highlighting, and a copy button | Claude Code's own markdown, and a copy button |
+| Code blocks in replies | Claude Code's own, with its copy and run buttons, beside a table too | The same |
 | Spinner | An animated icon per phase: thinking, tool use, writing, waiting | The skin's word with a band of light through it |
 | Above the prompt | A band as tall as the PR bar and the input: rings for context (with its tokens, `96k/200k`) and each plan limit (with when it resets: `2:40pm` today, `tmrw 9:00am`, `Mon 9:00am` within the week, `next Fri 9:00am` a week off; none once it has passed), a thin bar of what fills the context as /context counts it (each part's name and share in its alt text, `msgs 61%, tools 22%, …`), a Compact button from 50% context, and from 70% a "Compact now" nudge. The context ring is a CDJ-style jog ring of 12 segments whose unlit ones light in turn toward 12 o'clock, faster and brighter as it fills: faint in the accent, warn from 70%, and from 90% one segment blinking in the error colour, the arc dimming on the same beat from 97%. The plan limit rings share the 12 segments and hold still until 80%, then chase slowly in warn, and from 95% blink their last segment in the error colour. A narrow band drops the bar first, then the resets and the tokens; the Compact button never moves for them. A reset's label redraws at midnight and when it passes. Another mod's drawing there sits above the band, so the band stays nearest the prompt; as that drawing comes and goes, the area grows and shrinks above the band | Block meters with the same tokens and resets, the parts as a row of coloured cells, and the same button, pressed with `c` once ctrl+x tab focuses the band |
 | Turn footer | (not raised on desktop) | Time, tool count and lines changed |
@@ -68,7 +63,7 @@ Or take it with the rest of the set (savvy-progress, filetree, cache-tax) from o
 
 A card rises in row by row on its first draw only, the last row starting within a quarter second of
 the first; desktop, mobile and VS Code each count their own first draw, so a redraw (a setting, a
-theme change) never replays it. A code, diff or terminal card scrolled back into view, or drawn again under
+theme change) never replays it. A diff or terminal card scrolled back into view, or drawn again under
 a new request, holds still. A table draws no animation, so there is nothing to replay.
 On the desktop a redraw never restarts a running loop: the spinner, a running call's icon and the band's rings each keep their own place.
 The band's rings grow from the reading they last showed, and only the rings that moved animate; 1.2s

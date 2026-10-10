@@ -8,7 +8,6 @@ import { spinnerIcon, toolIcon } from '../hooks/icons'
 import type { SpinnerMode } from '../hooks/icons'
 import { toLight } from '../hooks/light'
 import type { Kind, Palette } from '../hooks/skin'
-import { codeSvg } from '../hooks/svg-code'
 import { diffSvg } from '../hooks/svg-diff'
 import { escape, FONT, MONO } from '../hooks/svg-kit'
 import { terminalSvg } from '../hooks/svg-terminal'
@@ -115,12 +114,11 @@ for (const [theme, palette] of [
   write(`hero-${theme}`, hero(palette))
   write(`spinners-${theme}`, spinners(palette))
   write(`terminal-${theme}`, terminalSvg({ stdout: ' Test Files  12 passed (12)\n      Tests  148 passed (148)\n   Duration  3.41s', stderr: '', interrupted: false }, false, palette, WIDTH))
-  write(`code-${theme}`, codeSvg(['// Rate limit per route, keyed by user', 'export function limit(route: string, perMinute = 60) {', '  const used = new Map<string, number>()', '  return (user: string) => (used.get(user) ?? 0) < perMinute', '}'].join('\n'), 'ts', palette, WIDTH))
   write(`usage-${theme}`, band([{ label: 'context', percent: 42, note: '84k/200k' }, { label: '5h', percent: 18, note: '2:40pm' }, { label: '7d', percent: 61, note: 'Mon 9:00am' }], palette, [], partsOf([{ name: 'Messages', tokens: 51_000 }, { name: 'System tools', tokens: 19_000 }, { name: 'System prompt', tokens: 8_000 }, { name: 'Memory files', tokens: 6_000 }])))
 }
 
 const page = (background: string, theme: string) =>
-  `<section style="background:${background};padding:24px;margin:0 0 16px"><h3 style="color:${theme === 'dark' ? '#ededed' : '#151515'};font:600 13px system-ui">${theme}</h3>${['hero', 'spinners', 'terminal', 'code', 'usage'].map(name => `<p><img src="${name}-${theme}.svg"></p>`).join('')}</section>`
+  `<section style="background:${background};padding:24px;margin:0 0 16px"><h3 style="color:${theme === 'dark' ? '#ededed' : '#151515'};font:600 13px system-ui">${theme}</h3>${['hero', 'spinners', 'terminal', 'usage'].map(name => `<p><img src="${name}-${theme}.svg"></p>`).join('')}</section>`
 
 writeFileSync(join(OUT, 'index.html'), `<!doctype html><meta charset="utf-8"><title>skins previews</title><body style="margin:0">${page('#151515', 'dark')}${page('#ffffff', 'light')}</body>`)
 
