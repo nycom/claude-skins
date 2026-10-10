@@ -239,8 +239,7 @@ test('the terminal spinner shimmers, the desktop one is an animated icon beside 
   await terminal.unmount()
 
   const desktop = await $.ui.mount(spinner('desktop'))
-  const icon = (await desktop.find({ type: 'Svg' })) as { props: { source: string } } | undefined
-  expect(icon?.props.source).toContain('class="bar')
+  expect((await svgOf(desktop)).source).toContain('class="bar')
   expect(await desktop.find({ type: 'Text', text: 'Sauteing' })).toBeDefined()
 })
 
@@ -698,6 +697,7 @@ test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards 
   // The rule outside any media query: the one inside it follows the system, not the setting.
   const holdsStill = (source: string | undefined) =>
     (source ?? '').split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
+  const calls = heldCalls($, on)
 
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
 
@@ -722,8 +722,9 @@ test('Claude Code\u2019s Reduce motion holds the desktop\u2019s icons and cards 
   // Turned off again, only the system's preference holds them still.
   reduces = false
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await calls.start('rm3')
   const moving = await $.ui.mount(toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'rm3', isRunning: true }), 'desktop'))
-  expect(holdsStill(((await moving.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source)).toBe(false)
+  expect(holdsStill((await svgOf(moving)).source)).toBe(false)
 })
 
 test('the band hides Compact below 50% context and offers it, dimmed, from 50%', async ($, on) => {
@@ -866,15 +867,24 @@ test('each surface remembers its own card draws: desktop, mobile, desktop animat
 
 const desktopReply = (requestId: string, text: string) =>
   ({ ...SITE, surface: 'desktop', component: 'AssistantMessage', requestId, props: { text, isFirstOfReply: true } }) as const
-const svgOf = async (ui: { find: (q: { type: string }) => Promise<unknown> }) =>
-  ((await ui.find({ type: 'Svg' })) as { props: { source: string; width: number } } | undefined)?.props ?? { source: '', width: 0 }
-// Every text a card draws, its lines joined by spaces.
-// Every image a mounted drawing holds, in order.
-const svgsOf = async (ui: { findAll: (q: { type: string }) => Promise<unknown[]> }) =>
-  ((await ui.findAll({ type: 'Svg' })) as { props: { source: string; alt: string; width: number; isInteractive?: boolean } }[]).map(svg => svg.props)
+// Every image a mounted drawing holds, in order: an Svg's, and the one a loop's Client draws.
+type Image = { source: string; alt: string; width: number; isInteractive?: boolean }
+type Drawn = { type?: string; props?: { props?: unknown }; children?: readonly unknown[] }
+async function svgsOf(ui: { drawn: () => Promise<unknown> }): Promise<Image[]> {
+  const found: Image[] = []
+  const walk = (node: unknown): void => {
+    const element = (typeof node === 'object' && node !== null ? node : {}) as Drawn
+    if (element.type === 'Svg') found.push(element.props as Image)
+    if (element.type === 'Client') found.push(element.props?.props as Image)
+    element.children?.forEach(walk)
+  }
+  walk(await ui.drawn())
+  return found
+}
+const svgOf = async (ui: { drawn: () => Promise<unknown> }) => (await svgsOf(ui))[0] ?? { source: '', width: 0 }
 
 // The images that loop: each ring's, a running arc, a spinner.
-const loopingOf = async (ui: { findAll: (q: { type: string }) => Promise<unknown[]> }) =>
+const loopingOf = async (ui: { drawn: () => Promise<unknown> }) =>
   (await svgsOf(ui)).map(svg => svg.source).filter(source => source.includes('infinite'))
 
 // An image's animation delays that are not fixed offsets: negative, or longer than any stagger.
@@ -1001,6 +1011,8 @@ test('a diff or terminal card scrolled back into view does not rise in again, wh
 
 test('a running tool keeps its arc spinning: only completed cards settle', async ($, on) => {
   const clock = stubEngine(on)
+  const calls = heldCalls($, on)
+  await calls.start('live-sh')
   const held = '*{animation:none!important}</style>'
   const running = toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'live-sh', isRunning: true }), 'desktop')
 
@@ -1057,7 +1069,7 @@ test('the context ring grows from its last reading, and a redraw at the same rea
   const ring = async () => {
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
     const band = await $.ui.mount(BAND('desktop', false))
-    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    const { source } = await svgOf(band)
     await band.unmount()
     return source
   }
@@ -1090,7 +1102,7 @@ test('a band left on screen settles by itself once its rings have grown', async 
   on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   const band = await $.ui.mount(BAND('desktop', false))
-  const source = async () => ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+  const source = async () => (await svgOf(band)).source
 
   expect(await source()).toContain('@keyframes fill')
   await clock.advance(1200)
@@ -1142,7 +1154,7 @@ test('the context ring chases faster in warn from 70% with Compact offered, and 
   const ring = async () => {
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
     const band = await $.ui.mount(BAND('desktop', false))
-    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    const { source } = await svgOf(band)
     await band.unmount()
     return source
   }
@@ -1576,4 +1588,153 @@ test('the selected skin is published for other mods’ panels, and follows /skin
 
   await runSkin($, 'off')
   expect(await published()).toBeNull()
+})
+
+// The desktop builds an Svg again as a new image on every redraw, which starts its loop over;
+// a Client under one key is kept and draws again only on new props.
+type ClientNode = { type: string; key?: string; props: { key?: string; module?: string; width?: unknown; height?: unknown; props?: { source?: string; width?: number } } }
+const clientsOf = async (ui: { findAll: (q: { type: string }) => Promise<unknown[]> }) => (await ui.findAll({ type: 'Client' })) as ClientNode[]
+const keyOf = (node: ClientNode) => node.props.key ?? node.key
+
+// Shell calls that run until released, started as the engine starts them: each resolves
+// once the call reaches the tool, past every plugin's hook, and again once it has ended.
+function heldCalls($: Engine, on: On) {
+  const reached = new Map<string, () => void>()
+  const release = new Map<string, () => void>()
+  const ended = new Map<string, Promise<unknown>>()
+  on('tool.call', { tool: 'Bash' }, ($, e) =>
+    new Promise(resolve => {
+      release.set(e.tool_use_id, () => resolve({ result: { stdout: '', stderr: '', interrupted: false } } as never))
+      reached.get(e.tool_use_id)?.()
+    }),
+  )
+  return {
+    start: (id: string) =>
+      new Promise<void>(resolve => {
+        reached.set(id, resolve)
+        ended.set(id, $.tool.call({ tool: 'Bash', command: 'sleep 9', tool_use_id: id } as never))
+      }),
+    finish: async (id: string) => {
+      release.get(id)?.()
+      await ended.get(id)
+    },
+  }
+}
+
+async function liveDesktop($: Engine, on: On, reduces = false) {
+  const clock = stubEngine(on)
+  on('config.list', () => ({ value: [{ key: 'reduceMotion', label: 'Reduce motion', kind: 'boolean', value: reduces, provider: { kind: 'engine' }, isLocked: false }] as never }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const calls = heldCalls($, on)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  return { clock, calls }
+}
+
+const spinnerAt = (surface: (typeof SURFACES)[number]) =>
+  ({ ...SITE, surface, component: 'Spinner', requestId: 'main', props: { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } }) as const
+
+const runningRow = (id: string, surface: (typeof SURFACES)[number] = 'desktop') => toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: id, isRunning: true }), surface)
+
+// Every Client a drawing holds, as plain data, and what each one's module draws.
+async function clientsDrawn($: Engine, element: Parameters<Engine['ui']['mount']>[0]) {
+  const ui = await $.ui.mount(element)
+  const clients = await clientsOf(ui)
+  const drawn = await Promise.all(clients.map(node => ui.drawn({ in: keyOf(node) ?? '' })))
+  const svgs = await svgsOf(ui)
+  await ui.unmount()
+  return { clients, drawn, svgs }
+}
+
+test('desktop loops are Clients under a stable key and a fixed size, their props byte-identical across redraws', async ($, on) => {
+  const { clock, calls } = await liveDesktop($, on)
+  await calls.start('run-1')
+  const draw = async () => [await clientsDrawn($, runningRow('run-1')), await clientsDrawn($, spinnerAt('desktop')), await clientsDrawn($, BAND('desktop', true))] as const
+
+  // The band's ring grows in, then settles.
+  await draw()
+  await clock.advance(1500)
+  const [row, spinner, band] = await draw()
+  for (const [found, key] of [
+    [row, 'loop-run-1'],
+    [spinner, 'loop-spinner'],
+    [band, 'loop-context'],
+  ] as const) {
+    expect(found.clients.map(keyOf)).toEqual([key])
+    const [client] = found.clients
+    expect(client?.props.module).toBe('hooks/anim.tsx')
+    expect(typeof client?.props.width).toBe('number')
+    expect(typeof client?.props.height).toBe('number')
+    // The module draws the looping image itself.
+    expect(found.drawn[0]).toMatchObject({ type: 'Svg', props: { source: client?.props.props?.source } })
+    expect(client?.props.props?.source).toContain(' infinite')
+  }
+  expect(row.clients[0]?.props.props?.source).toContain('class="spin"')
+
+  // The clock moves on, another call starts and ends, a new usage reading lands.
+  await clock.advance(1370)
+  await calls.start('other')
+  await calls.finish('other')
+  await $.session.measure({} as never).catch(() => undefined)
+  const later = await draw()
+  expect(JSON.stringify(later.map(found => found.clients))).toBe(JSON.stringify([row, spinner, band].map(found => found.clients)))
+})
+
+test('at most three loops move at once: the spinner and the newest running rows, the rest held', async ($, on) => {
+  const { calls } = await liveDesktop($, on)
+  const ids = ['r1', 'r2', 'r3', 'r4', 'r5']
+  for (const id of ids) await calls.start(id)
+  const held = '*{animation:none!important}</style>'
+  const drawAll = async () => {
+    const rows = await Promise.all(ids.map(id => clientsDrawn($, runningRow(id))))
+    const spinner = await clientsDrawn($, spinnerAt('desktop'))
+    const band = await clientsDrawn($, BAND('desktop', true))
+    return { rows, spinner, band }
+  }
+
+  const all = await drawAll()
+  expect(all.rows.map(row => row.clients.map(keyOf))).toEqual([[], [], [], ['loop-r4'], ['loop-r5']])
+  expect(all.spinner.clients.map(keyOf)).toEqual(['loop-spinner'])
+  expect(all.band.clients).toEqual([])
+  // The rows past the budget, and the band's ring, are drawn held.
+  for (const row of all.rows.slice(0, 3)) expect(row.svgs[0]?.source).toContain(held)
+  expect(all.band.svgs.find(svg => svg.source.includes('<mask id="jog"'))?.source).toContain(held)
+
+  // A row that ends hands its place to the newest still running.
+  await calls.finish('r5')
+  const after = await drawAll()
+  expect(after.rows.slice(0, 4).map(row => row.clients.map(keyOf))).toEqual([[], [], ['loop-r3'], ['loop-r4']])
+  // With every call done and the turn over, the band's ring moves again.
+  for (const id of ids) await calls.finish(id)
+  expect((await clientsDrawn($, BAND('desktop', false))).clients.map(keyOf)).toEqual(['loop-context'])
+})
+
+test('Reduce motion draws no loop: no Client, every image held', async ($, on) => {
+  const { calls } = await liveDesktop($, on, true)
+  await calls.start('rm-1')
+  const holdsStill = (source: string) =>
+    source.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
+
+  for (const element of [runningRow('rm-1'), spinnerAt('desktop'), BAND('desktop', false)]) {
+    const found = await clientsDrawn($, element)
+    expect(found.clients).toEqual([])
+    const looping = found.svgs.filter(svg => svg.source.includes(' infinite'))
+    expect(looping.length).toBeGreaterThan(0)
+    for (const svg of looping) expect(holdsStill(svg.source)).toBe(true)
+  }
+})
+
+test('the terminal draws no Client: its rows, spinner and band stay text', async ($, on) => {
+  const { calls } = await liveDesktop($, on)
+  await calls.start('t-1')
+
+  for (const element of [runningRow('t-1', 'terminal'), spinnerAt('terminal'), BAND('terminal', true)]) {
+    const ui = await $.ui.mount(element)
+    expect(await clientsOf(ui)).toEqual([])
+    expect(await ui.findAll({ type: 'Svg' })).toEqual([])
+    await ui.unmount()
+  }
+  const row = await $.ui.mount(runningRow('t-1', 'terminal'))
+  expect(await row.find({ type: 'Text', text: /○─ Bash {2}sleep 9/ })).toBeDefined()
 })

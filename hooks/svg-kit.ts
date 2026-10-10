@@ -117,6 +117,12 @@ export const still = (moving?: string): string =>
       ? `:not(${moving}){animation:none!important}${SYSTEM_HOLD}`
       : SYSTEM_HOLD
 
+// Whether a drawing loops as drawn now: an endless animation, motion not held.
+export const isLooping = (source: string): boolean => !isStill && !isRedraw && source.includes(' infinite')
+
+// A looping drawing held still, for one past the animation budget.
+export const held = (source: string): string => source.replace('</style>', `${HOLD}</style>`)
+
 // A looping drawing's source, built once per input and the same string from then on. The
 // desktop draws an Svg as an image of its source: an unchanged source keeps its animation
 // running through a redraw, a changed one is a new image whose loops start over. Held still
