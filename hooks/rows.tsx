@@ -14,11 +14,16 @@ import { PX_PER_COLUMN, cardWidth } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { COMPACT_NUDGE, COMPACT_SHOW, partCells, usageLine, usageSvg } from './svg-usage'
+import { BAND_H, COMPACT_NUDGE, COMPACT_SHOW, partCells, usageLine, usageSvg } from './svg-usage'
 import type { Meter, Part } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 
 export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button' | 'Link'>
+
+// An experiment to try live: true draws the looping images (the band's rings, tool icons and
+// spinners) in the desktop's sandboxed frame instead of as an image. Off, they stay images.
+const LOOPS_INTERACTIVE = false
+const LOOP_PROPS = LOOPS_INTERACTIVE ? { isInteractive: true } : {}
 
 // The vector element, on the surfaces that have one (the desktop app).
 export type SvgElement = ElementTable<'desktop'>['Svg']
@@ -33,8 +38,6 @@ export type Look = {
   svg?: SvgElement
   // Puts text on the clipboard of the surface drawing; absent where nothing can copy.
   copy?: (text: string) => void
-  // When the row is drawn, in ms, so a moving icon or ring drawn again carries on mid-cycle.
-  now?: number
 }
 
 export type Call = {
@@ -165,11 +168,11 @@ function stack(look: Look, line: ReturnType<Ui['Text']>) {
 function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[], line: ReturnType<Ui['Text']>) {
   const { Box } = look.ui
   const { color, word, mark } = status(look, calls)
-  const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark, look.now)
+  const source = toolIcon(kind, color, calls.some(call => call.isRunning), mark)
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={source} alt={`${KIND_LABEL[kind]}, ${word}`} width={16} height={16} />
+      <Svg source={source} alt={`${KIND_LABEL[kind]}, ${word}`} width={16} height={16} {...LOOP_PROPS} />
       {line}
     </Box>
   )
@@ -242,7 +245,7 @@ export function desktopSpinnerRow(look: Look, Svg: SvgElement, mode: SpinnerMode
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="center">
-      <Svg source={spinnerIcon(mode, look.skin.palette.user, look.now)} alt={mode} width={20} height={20} />
+      <Svg source={spinnerIcon(mode, look.skin.palette.user)} alt={mode} width={20} height={20} {...LOOP_PROPS} />
       <Text color={look.skin.palette.muted}>{text}</Text>
     </Box>
   )
@@ -542,10 +545,19 @@ function meterView(look: Look, meters: readonly Meter[], parts: readonly Part[],
 
     if (look.svg !== undefined) {
       const Svg = look.svg
-      const built = usageSvg(view.meters, palette, starts, view.parts, look.now)
+      const built = usageSvg(view.meters, palette, starts, view.parts)
 
+      // Each ring an image of its own, so what changes beside it leaves its loop running.
       if (kept === 0 || built.width <= room * PX_PER_COLUMN) {
-        return <Svg source={built.source} alt={built.alt} width={built.width} height={built.height} />
+        return (
+          <Box flexDirection="row" alignItems="center">
+            {built.rings.flatMap(({ ring, text }) => [
+              <Svg source={ring.source} alt={ring.alt} width={ring.width} height={BAND_H} {...LOOP_PROPS} />,
+              <Svg source={text.source} alt={text.alt} width={text.width} height={BAND_H} />,
+            ])}
+            {built.bar === undefined ? '' : <Svg source={built.bar.source} alt={built.bar.alt} width={built.bar.width} height={BAND_H} />}
+          </Box>
+        )
       }
 
       continue

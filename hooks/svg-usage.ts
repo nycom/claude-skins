@@ -2,10 +2,13 @@ import type { UsageSnap } from '../types'
 import { compactCount, resetLabel } from './format'
 import { channels } from './light'
 import type { Palette, Slot } from './skin'
-import { escape, FONT, loopDelay, measure, still } from './svg-kit'
+import { escape, FONT, loopSource, measure, still } from './svg-kit'
 
 // The band above the prompt: how full the context window is and how much of each plan
 // limit is spent, as rings that fill in when they draw, and what fills the context, as a bar.
+// Each ring is an image of its own, apart from its text and the bar: the desktop draws an
+// Svg as an image of its source, and a changed source is a new image whose loops start
+// over, so a ring's source holds only what its ring shows: its reading, colours and growth.
 
 const RING_R = 8
 
@@ -27,14 +30,12 @@ export type Part = { label: string; share: number; slot: Slot }
 // How long after a new reading the rings grow; past it they are drawn settled.
 export const SETTLE_MS = 1200
 
-// A ring grows from the reading it last showed, not from empty. The band is one image, so a
-// new reading on any ring redraws them all: the rings that moved grow from where they were,
-// the rest are drawn already full. A redraw at the same readings keeps the same starts, so it
-// draws the same image and nothing replays, until SETTLE_MS have passed: from then on the
-// rings are drawn settled, so an image the surface builds again has no growth left to play.
-// `since` is when the readings changed: a band still growing is drawn as of then, so its
-// moving parts keep the same delays and its redraws stay the same image.
-export function rampFrom(): (meters: readonly Meter[], now: number) => { starts: readonly number[]; since: number } {
+// A ring grows from the reading it last showed, not from empty. A new reading on any ring
+// redraws the band: the rings that moved grow from where they were, the rest are drawn already
+// full. A redraw at the same readings keeps the same starts, so it draws the same images and
+// nothing replays, until SETTLE_MS have passed: from then on the rings are drawn settled, so
+// an image the surface builds again has no growth left to play.
+export function rampFrom(): (meters: readonly Meter[], now: number) => readonly number[] {
   const shown = new Map<string, number>()
   let key = ''
   let changedAt = 0
@@ -52,7 +53,7 @@ export function rampFrom(): (meters: readonly Meter[], now: number) => { starts:
       starts = meters.map(meter => meter.percent)
     }
 
-    return { starts, since: changedAt }
+    return starts
   }
 }
 
@@ -173,104 +174,112 @@ const PLAN_TIERS: readonly JogTier[] = [
 
 const meterText = (meter: Meter): string => `${meter.percent}% ${meter.label}${meter.note === undefined ? '' : ` · ${meter.note}`}`
 
-// `starts` is where each ring's fill starts growing from, in percent, one per meter; empty by default.
-// The breakdown bar follows the rings; it never animates. `now` is when the band is drawn, in
-// ms: a redraw is a new image, so the chases and the dim pick up where they were (see loopDelay).
-export function usageSvg(meters: readonly Meter[], palette: Palette, starts: readonly number[] = [], parts: readonly Part[] = [], now?: number): { source: string; width: number; height: number; alt: string } {
-  const height = BAND_H
-  const circumference = 2 * Math.PI * RING_R
-  const lefts: number[] = []
-  let width = 0
+// A ring's image: square, centred on its ring, the text's image right after it.
+export const RING_W = RING_R * 2 + 8
+const RX = RING_W / 2
+const CIRCUMFERENCE = 2 * Math.PI * RING_R
+const SEGMENT = CIRCUMFERENCE / SEGMENTS
+// Room between a ring and its text.
+const TEXT_X = 3
 
-  for (const meter of meters) {
-    lefts.push(width)
-    width += RING_R * 2 + 4 + 7 + Math.ceil(measure(meterText(meter), false, 12)) + ITEM_GAP
-  }
+type Image = { source: string; width: number; alt: string }
 
-  const ramps: string[] = []
-  const items = meters
-    .map((meter, i) => {
-      const x = (lefts[i] ?? 0) + RING_R + 4
-      const filled = (circumference * meter.percent) / 100
-      const start = (circumference * (starts[i] ?? 0)) / 100
-      const isContext = meter.label === 'context'
-      const jog = (isContext ? JOG_TIERS : PLAN_TIERS).find(tier => meter.percent >= tier.from)
-      const color = jog === undefined ? meterColor(meter.percent, palette) : palette[jog.slot]
-      // Each ring has its own keyframes, from where it was to where it is; none when it did not move.
-      const moves = [
-        ...(start === filled ? [] : [`fill${i} .9s cubic-bezier(.2,.8,.2,1)`]),
-        ...(jog !== undefined && isContext && meter.percent >= JOG_DIM ? [`dim ${jog.seconds}s ease-in-out ${loopDelay(now, jog.seconds)} infinite`] : []),
-      ]
-      const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
-      ramps.push(start === filled ? '' : `@keyframes fill${i}{from{stroke-dasharray:${start} ${circumference}}}`)
+const image = (width: number, style: string, body: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${BAND_H}" viewBox="0 0 ${width} ${BAND_H}"><style>${style}</style>${body}</svg>`
 
-      // Every ring is a jog ring, masked to twelve segments by an 8° gap centred on every hour.
-      // Its arc ends square: a round cap would poke past a gap into the next segment.
-      const segment = circumference / SEGMENTS
-      const ring = [
-        `<mask id="jog${i}" maskUnits="userSpaceOnUse" x="${x - 12}" y="${CY - 12}" width="24" height="24"><circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(segment * 22) / 30} ${(segment * 8) / 30}" transform="rotate(-86 ${x} ${CY})"/></mask><g mask="url(#jog${i})">`,
-        `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
-        `<circle class="fill" cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 ${x} ${CY})"${grow}/>`,
-      ]
+// One ring, its fill grown from `start` percent: every input is a reading or a colour, so the
+// same reading draws the same image and its chase runs on through any redraw.
+function ringSvg(isContext: boolean, percent: number, start: number, palette: Palette): string {
+  const jog = (isContext ? JOG_TIERS : PLAN_TIERS).find(tier => percent >= tier.from)
+  const color = jog === undefined ? meterColor(percent, palette) : palette[jog.slot]
 
-      if (jog !== undefined) {
-        // A segment is unlit while the arc covers less than half of it; the last one always counts.
-        const first = Math.min(SEGMENTS - 1, Math.round((meter.percent * SEGMENTS) / 100))
-        const count = SEGMENTS - first
-        // Each lights a tenth of a cycle after the one before, closer when that would run past the cycle.
-        const step = Math.min(jog.seconds / 10, (jog.seconds * 0.55) / Math.max(1, count - 1))
-        // Each ring has its own chase keyframes, as their peaks differ.
-        ramps.push(`@keyframes jog${i}{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, isContext && meter.percent >= JOG_DIM ? '@keyframes dim{50%{opacity:.6}}' : '')
-        // Held still, only the next segment up shows, at .4.
-        ring.push(
-          ...Array.from({ length: count }, (_, n) =>
-            `<circle cx="${x}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${segment} ${circumference}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${x} ${CY})" style="animation:jog${i} ${jog.seconds}s ease-in-out ${loopDelay(now, jog.seconds, n * step)} infinite"/>`,
-          ),
-        )
-      }
+  return loopSource(`ring:${isContext}:${percent}:${start}:${color}:${palette.muted}`, () => {
+    const filled = (CIRCUMFERENCE * percent) / 100
+    const from = (CIRCUMFERENCE * start) / 100
+    const isDim = jog !== undefined && isContext && percent >= JOG_DIM
+    // The fill grows from where it was to where it is; not at all when it did not move.
+    const moves = [...(from === filled ? [] : ['fill .9s cubic-bezier(.2,.8,.2,1)']), ...(isDim ? [`dim ${jog.seconds}s ease-in-out infinite`] : [])]
+    const grow = moves.length === 0 ? '' : ` style="animation:${moves.join(',')}"`
+    const style: string[] = from === filled ? [] : [`@keyframes fill{from{stroke-dasharray:${from} ${CIRCUMFERENCE}}}`]
 
-      ring.push('</g>')
+    // A jog ring, masked to twelve segments by an 8° gap centred on every hour. Its arc ends
+    // square: a round cap would poke past a gap into the next segment.
+    const ring = [
+      `<mask id="jog" maskUnits="userSpaceOnUse" x="0" y="${CY - 12}" width="24" height="24"><circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="${(SEGMENT * 22) / 30} ${(SEGMENT * 8) / 30}" transform="rotate(-86 ${RX} ${CY})"/></mask><g mask="url(#jog)">`,
+      `<circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${palette.muted}" stroke-opacity="${TRACK_OPACITY}" stroke-width="2.5"/>`,
+      `<circle class="fill" cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${filled} ${CIRCUMFERENCE}" transform="rotate(-90 ${RX} ${CY})"${grow}/>`,
+    ]
 
-      return [
-        ...ring,
-        `<text x="${x + RING_R + 7}" y="${CY + 4}" font-size="12"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}${meter.note === undefined ? '' : ` · ${escape(meter.note)}`}</tspan></text>`,
-      ].join('')
-    })
-    .join('')
+    if (jog !== undefined) {
+      // A segment is unlit while the arc covers less than half of it; the last one always counts.
+      const first = Math.min(SEGMENTS - 1, Math.round((percent * SEGMENTS) / 100))
+      const count = SEGMENTS - first
+      // Each lights a tenth of a cycle after the one before, closer when that would run past the cycle.
+      const step = Math.min(jog.seconds / 10, (jog.seconds * 0.55) / Math.max(1, count - 1))
+      style.push(`@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:${jog.peak}}}`, isDim ? '@keyframes dim{50%{opacity:.6}}' : '')
+      // Held still, only the next segment up shows, at .4.
+      ring.push(
+        ...Array.from({ length: count }, (_, n) =>
+          `<circle cx="${RX}" cy="${CY}" r="${RING_R}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="${SEGMENT} ${CIRCUMFERENCE}" opacity="${n === 0 ? 0.4 : 0}" transform="rotate(${(first + n) * 30 - 90} ${RX} ${CY})" style="animation:jog ${jog.seconds}s ease-in-out ${Math.round(n * step * 1000)}ms infinite"/>`,
+        ),
+      )
+    }
 
-  let bar = ''
+    ring.push('</g>')
 
-  if (parts.length > 0) {
-    const left = width + 4
-    const top = CY - BAR_H / 2
-    const opacities = partOpacities(parts, palette)
-    // A 1px gap parts the segments, so they read apart even where a skin gives them one colour.
-    const segments = partSpans(parts, BAR_W)
-      .map((span, i) => ({ ...span, i }))
-      .filter(span => span.to - span.from > 1)
-      .map(span => `<rect class="part" x="${left + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}" fill-opacity="${opacities[span.i]}"/>`)
+    return image(RING_W, [...style, still()].join(''), ring.join(''))
+  })
+}
 
-    bar = [
-      `<rect x="${left}" y="${top}" width="${BAR_W}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${palette.muted}" fill-opacity="${TRACK_OPACITY}"/>`,
-      ...segments,
-    ].join('')
-    width = left + BAR_W + 4
-  }
-
-  const style = [
-    `text{font-family:${FONT}}`,
-    ...ramps,
-    still(),
-  ].join('')
+// A ring's reading and note, after its ring, with the room before the next ring.
+function textSvg(meter: Meter, palette: Palette): Image {
+  const width = TEXT_X + Math.ceil(measure(meterText(meter), false, 12)) + ITEM_GAP
+  const body = `<text x="${TEXT_X}" y="${CY + 4}" font-size="12"><tspan style="fill:${palette.fg};font-weight:600">${meter.percent}%</tspan><tspan style="fill:${palette.muted}"> ${escape(meter.label)}${meter.note === undefined ? '' : ` · ${escape(meter.note)}`}</tspan></text>`
 
   return {
-    source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${style}</style>${items}${bar}</svg>`,
+    source: image(width, `text{font-family:${FONT}}`, body),
     width,
-    height,
-    alt: [
-      meters.map(meter => `${meter.label} ${meter.percent}%${meter.note === undefined ? '' : meter.label === 'context' ? ` (${meter.note} tokens)` : ` (resets ${meter.note.replace(/^tmrw/, 'tomorrow')})`}`).join(', '),
-      ...(bar === '' ? [] : [`context holds ${parts.map(part => `${part.label} ${part.share}%`).join(', ')}`]),
-    ].join('; '),
+    alt: meter.note === undefined ? '' : meter.label === 'context' ? `${meter.note} tokens` : `resets ${meter.note.replace(/^tmrw/, 'tomorrow')}`,
+  }
+}
+
+// What fills the context, as a bar after the rings; it never animates.
+function barSvg(parts: readonly Part[], palette: Palette): Image {
+  const top = CY - BAR_H / 2
+  const opacities = partOpacities(parts, palette)
+  // A 1px gap parts the segments, so they read apart even where a skin gives them one colour.
+  const segments = partSpans(parts, BAR_W)
+    .map((span, i) => ({ ...span, i }))
+    .filter(span => span.to - span.from > 1)
+    .map(span => `<rect class="part" x="${4 + span.from}" y="${top}" width="${span.to - span.from - (span.to === BAR_W ? 0 : 1)}" height="${BAR_H}" fill="${palette[span.part.slot]}" fill-opacity="${opacities[span.i]}"/>`)
+
+  return {
+    source: image(BAR_W + 8, '', [`<rect x="4" y="${top}" width="${BAR_W}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${palette.muted}" fill-opacity="${TRACK_OPACITY}"/>`, ...segments].join('')),
+    width: BAR_W + 8,
+    alt: `context holds ${parts.map(part => `${part.label} ${part.share}%`).join(', ')}`,
+  }
+}
+
+// The band's images, in order: each ring, RING_W wide, then its text; then the breakdown bar,
+// when there are parts. `starts` is where each ring's fill starts growing from, in percent,
+// one per meter; empty by default. `width` is all of them side by side. A ring's alt reads
+// its reading, its text's the note, the bar's every part.
+export function usageSvg(
+  meters: readonly Meter[],
+  palette: Palette,
+  starts: readonly number[] = [],
+  parts: readonly Part[] = [],
+): { rings: { ring: Image; text: Image }[]; bar?: Image; width: number } {
+  const rings = meters.map((meter, i) => ({
+    ring: { source: ringSvg(meter.label === 'context', meter.percent, starts[i] ?? 0, palette), width: RING_W, alt: `${meter.label} ${meter.percent}%` },
+    text: textSvg(meter, palette),
+  }))
+  const bar = parts.length > 0 ? barSvg(parts, palette) : undefined
+
+  return {
+    rings,
+    ...(bar === undefined ? {} : { bar }),
+    width: rings.reduce((sum, { text }) => sum + RING_W + text.width, 0) + (bar?.width ?? 0),
   }
 }
 

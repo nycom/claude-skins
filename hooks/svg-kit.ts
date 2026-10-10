@@ -117,19 +117,27 @@ export const still = (moving?: string): string =>
       ? `:not(${moving}){animation:none!important}${SYSTEM_HOLD}`
       : SYSTEM_HOLD
 
-// A looping animation's delay. An image drawn again is a new image, which starts its
-// animations over; given when it is drawn (`now`, in ms), a loop starts where it would be
-// had it run since the epoch, so a redraw carries on mid-cycle. `offset` is how far it
-// lags the loop's start, in seconds. Held still, or with no `now`, the delay is the offset,
-// so the image holds no time.
-export function loopDelay(now: number | undefined, seconds: number, offset = 0): string {
-  if (now === undefined || isStill) {
-    return `${Math.round(offset * 1000)}ms`
+// A looping drawing's source, built once per input and the same string from then on. The
+// desktop draws an Svg as an image of its source: an unchanged source keeps its animation
+// running through a redraw, a changed one is a new image whose loops start over. Held still
+// or redrawn, a source differs (see `still`), so those are part of the key.
+// ponytail: cleared whole when full; readings, skins and kinds keep it to a few dozen.
+const loops = new Map<string, string>()
+
+export function loopSource(key: string, draw: () => string): string {
+  const full = `${isStill}:${isRedraw}:${key}`
+  let source = loops.get(full)
+
+  if (source === undefined) {
+    if (loops.size >= 256) {
+      loops.clear()
+    }
+
+    source = draw()
+    loops.set(full, source)
   }
 
-  const into = (((now / 1000 - offset) % seconds) + seconds) % seconds
-
-  return `${-Math.round(into * 1000)}ms`
+  return source
 }
 
 export const riseDelay = (index: number, stepMs: number, startMs = 80): string =>

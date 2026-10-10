@@ -577,7 +577,7 @@ reply width: ${lastColumns} columns`
     const diff = diffstat(e.props.output)
     const target = summarize(e.props.tool, e.props.input, await $.session.cwd())
 
-    return toolRow({ ...lookOf($.ui.resolve(e), active, e.surface), now: await $.clock.now() }, e.props, kind, target, {
+    return toolRow(lookOf($.ui.resolve(e), active, e.surface), e.props, kind, target, {
       ...(ms >= 0 && !e.props.isRunning ? { ms } : {}),
       ...(diff === null ? {} : diff),
     })
@@ -590,7 +590,7 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
-    return groupRow({ ...lookOf($.ui.resolve(e), active, e.surface), now: await $.clock.now() }, e.props.calls)
+    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -700,7 +700,7 @@ reply width: ${lastColumns} columns`
     }
 
     if (e.surface !== 'terminal') {
-      const look = { ...lookOf($.ui.resolve(e), active, e.surface), now: await $.clock.now() }
+      const look = lookOf($.ui.resolve(e), active, e.surface)
 
       return look.svg === undefined
         ? next(e)
@@ -749,9 +749,9 @@ reply width: ${lastColumns} columns`
       return next(e)
     }
 
-    const { starts, since } = ramp(meters, now)
+    const starts = ramp(meters, now)
     const isGrowing = starts.some((start, i) => start !== meters[i]?.percent)
-    const look = { ...lookOf($.ui.resolve(e), active, e.surface), now: isGrowing ? since : now }
+    const look = lookOf($.ui.resolve(e), active, e.surface)
     const { Box } = look.ui
     // With no mod's row above, what comes back is the engine's own band, by reference, which
     // draws nothing without a survey; it is left out, so no empty row or gap sits above the rings.

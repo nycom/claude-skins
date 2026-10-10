@@ -869,6 +869,17 @@ const desktopReply = (requestId: string, text: string) =>
 const svgOf = async (ui: { find: (q: { type: string }) => Promise<unknown> }) =>
   ((await ui.find({ type: 'Svg' })) as { props: { source: string; width: number } } | undefined)?.props ?? { source: '', width: 0 }
 // Every text a card draws, its lines joined by spaces.
+// Every image a mounted drawing holds, in order.
+const svgsOf = async (ui: { findAll: (q: { type: string }) => Promise<unknown[]> }) =>
+  ((await ui.findAll({ type: 'Svg' })) as { props: { source: string; alt: string; width: number; isInteractive?: boolean } }[]).map(svg => svg.props)
+
+// The images that loop: each ring's, a running arc, a spinner.
+const loopingOf = async (ui: { findAll: (q: { type: string }) => Promise<unknown[]> }) =>
+  (await svgsOf(ui)).map(svg => svg.source).filter(source => source.includes('infinite'))
+
+// An image's animation delays that are not fixed offsets: negative, or longer than any stagger.
+const timedDelays = (source: string) => [...source.matchAll(/(-?\d+)ms infinite/g)].map(m => Number(m[1])).filter(ms => ms < 0 || ms > 2000)
+
 const drawnText = (source: string) => [...source.matchAll(/>([^<>]+)</g)].map(m => m[1]).join(' ')
 
 test('a desktop table card keeps Copy in its top-right corner, over the header row, with no column of its own', async ($, on) => {
@@ -1015,21 +1026,22 @@ test('when the context ring moves, a weekly ring that did not move stays full in
   on('session.start', () => ({ cwd: '/work' }))
   on('command.register', () => ({ value: { command: 'skin' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
-  const ring = async () => {
+  const rings = async () => {
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
     const band = await $.ui.mount(BAND('desktop', false))
-    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
+    const sources = (await svgsOf(band)).map(svg => svg.source).filter(source => source.includes('<mask id="jog"'))
     await band.unmount()
-    return source
+    return sources
   }
 
-  const first = await ring()
-  expect(first).toContain('@keyframes fill0{')
-  expect(first).toContain('@keyframes fill1{')
+  const first = await rings()
+  expect(first.length).toBe(2)
+  expect(first[0]).toContain('@keyframes fill{')
+  expect(first[1]).toContain('@keyframes fill{')
   percent = 55
-  const moved = await ring()
-  expect(moved).toContain('@keyframes fill0{')
-  expect(moved).not.toContain('fill1')
+  const moved = await rings()
+  expect(moved[0]).toContain('@keyframes fill{')
+  expect(moved[1]).not.toContain('@keyframes fill')
 })
 
 test('the context ring grows from its last reading, and a redraw at the same reading is the same image', async ($, on) => {
@@ -1051,10 +1063,10 @@ test('the context ring grows from its last reading, and a redraw at the same rea
   }
   const circumference = 2 * Math.PI * 8
 
-  expect(await ring()).toContain('@keyframes fill0{from{stroke-dasharray:0 ')
+  expect(await ring()).toContain('@keyframes fill{from{stroke-dasharray:0 ')
   percent = 55
   const grown = await ring()
-  expect(grown).toContain(`@keyframes fill0{from{stroke-dasharray:${(circumference * 40) / 100} `)
+  expect(grown).toContain(`@keyframes fill{from{stroke-dasharray:${(circumference * 40) / 100} `)
   expect(await ring()).toBe(grown)
   // Once grown, the band settles: an image built again has nothing left to replay.
   await clock.advance(1200)
@@ -1101,12 +1113,12 @@ test('a band left on screen relabels its reset at midnight and drops it once the
   on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   const band = await $.ui.mount(BAND('desktop', false))
-  const alt = async () => ((await band.find({ type: 'Svg' })) as { props: { alt: string } } | undefined)?.props.alt ?? ''
+  const alt = async () => (await svgsOf(band)).map(svg => svg.alt).join(' | ')
 
-  expect(await alt()).toContain('7d 23% (resets tomorrow 9:00am)')
+  expect(await alt()).toContain('7d 23% | resets tomorrow 9:00am')
   // Saturday 8:00: the same reset, now today's.
   await clock.advance(9 * 60 * 60 * 1000)
-  expect(await alt()).toContain('7d 23% (resets 9:00am)')
+  expect(await alt()).toContain('7d 23% | resets 9:00am')
   // Saturday 10:00: the window has reset, so no time is named.
   await clock.advance(2 * 60 * 60 * 1000)
   expect(await alt()).toContain('7d 23%')
@@ -1136,79 +1148,14 @@ test('the context ring chases faster in warn from 70% with Compact offered, and 
   }
   const held = (source: string) => source.split('@media (prefers-reduced-motion:reduce){*{animation:none!important}}').join('').includes('*{animation:none!important}')
 
-  expect(await ring()).toMatch(/animation:jog\d+ 3s ease-in-out/)
+  expect(await ring()).toContain('animation:jog 3s ease-in-out')
   percent = 72
   const nudged = await ring()
-  expect(nudged).toMatch(/@keyframes jog\d+\{/)
-  expect(nudged).toMatch(/animation:jog\d+ 2.4s ease-in-out/)
+  expect(nudged).toContain('@keyframes jog{')
+  expect(nudged).toContain('animation:jog 2.4s ease-in-out')
   expect(held(nudged)).toBe(false)
   reduces = true
   expect(held(await ring())).toBe(true)
-})
-
-test('the band, a running arc and the spinner, drawn again later, carry on where they were', async ($, on) => {
-  const clock = stubEngine(on)
-  on('session.start', () => ({ cwd: '/work' }))
-  on('command.register', () => ({ value: { command: 'skin' } }))
-  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
-  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
-  const spinner = { ...SITE, surface: 'desktop', component: 'Spinner', requestId: 'main', props: { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } } as const
-  const running = toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'live-sh', isRunning: true }), 'desktop')
-  const delays = async () => {
-    const found: number[] = []
-    for (const element of [BAND('desktop', false), running, spinner]) {
-      const ui = await $.ui.mount(element)
-      found.push(...[...(await svgOf(ui)).source.matchAll(/s (?:ease-in-out|linear) (-?\d+)ms infinite/g)].map(m => Number(m[1])))
-      await ui.unmount()
-    }
-    return found
-  }
-
-  // A band whose rings have grown, so it is drawn as of now.
-  await delays()
-  await clock.advance(1500)
-  const first = await delays()
-  await clock.advance(370)
-  const later = await delays()
-  expect(first.length).toBeGreaterThan(2)
-  // Each loop is 370ms further on: its delay 370ms more negative, or wrapped round its period.
-  later.forEach((delay, i) => expect(delay === (first[i] ?? NaN) - 370 || delay > (first[i] ?? NaN)).toBe(true))
-  expect(later).not.toEqual(first)
-})
-
-test('a band redrawn while its rings grow is the same image, so the growth does not replay', async ($, on) => {
-  let percent = 40
-  const clock = mock.clock(on, { now: 10_000 })
-  on('session.cwd', () => ({ value: '/work' }))
-  on('store.get', () => ({ value: undefined }))
-  on('ui.render', () => STOCK)
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [] } }))
-  on('session.start', () => ({ cwd: '/work' }))
-  on('command.register', () => ({ value: { command: 'skin' } }))
-  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
-  const ring = async () => {
-    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
-    const band = await $.ui.mount(BAND('desktop', false))
-    const source = ((await band.find({ type: 'Svg' })) as { props: { source: string } } | undefined)?.props.source ?? ''
-    await band.unmount()
-    return source
-  }
-
-  await ring()
-  await clock.advance(1500)
-  await ring()
-  percent = 55
-  const growing = await ring()
-  expect(growing).toContain('@keyframes fill0{')
-  await clock.advance(400)
-  expect(await ring()).toBe(growing)
-  // Settled, the chase carries on from where the growing image had it.
-  await clock.advance(1100)
-  const settled = await ring()
-  expect(settled).not.toContain('@keyframes fill')
-  const delays = (source: string) => [...source.matchAll(/ease-in-out (-?\d+)ms infinite/g)].map(m => Number(m[1]))
-  const lag = (a: number, b: number) => (((a - b - 1500) % 3000) + 3000) % 3000
-  delays(settled).forEach((delay, i) => expect(Math.min(lag(delays(growing)[i] ?? NaN, delay), 3000 - lag(delays(growing)[i] ?? NaN, delay))).toBeLessThanOrEqual(2))
 })
 
 // A Friday noon, in local time so the reset labels hold in any time zone.
@@ -1266,17 +1213,152 @@ async function bandWith($: Engine, on: On, usage: (args: { breakdown?: string })
 
   const draw = async (surface: (typeof SURFACES)[number], columns = 200) => {
     const band = await $.ui.mount(BAND(surface, false, columns))
-    const svg = (await band.find({ type: 'Svg' })) as { props: { source: string; alt: string } } | undefined
-    const source = svg?.props.source
+    // The desktop's images side by side, as one.
+    const svgs = await svgsOf(band)
     const text = JSON.stringify(await band.drawn())
-    const width = ((await band.find({ type: 'Svg' })) as { props: { width: number } } | undefined)?.props.width ?? 0
     const hasCompact = (await band.find({ key: 'compact' })) !== undefined
     await band.unmount()
-    return { source: source ?? '', alt: svg?.props.alt ?? '', text, hasCompact, width }
+    return {
+      source: svgs.map(svg => svg.source).join(''),
+      alt: svgs.map(svg => svg.alt).join(' | '),
+      text,
+      hasCompact,
+      width: svgs.reduce((sum, svg) => sum + svg.width, 0),
+    }
   }
 
   return { draw, asked }
 }
+
+test('each ring is an image of its own, byte-identical whatever its tokens, reset, the breakdown or the clock', async ($, on) => {
+  let tokens = 148_000
+  let resetsAt = new Date(2026, 9, 9, 14, 40)
+  let messages = 61_000
+  const clock = mock.clock(on, { now: NOON })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', ($, e) => ({ value: e.key === 'prefs' ? { skin: 'tokyo-night' } : undefined }))
+  on('env.get', () => ({ value: undefined }))
+  on('ui.render', () => STOCK)
+  on('config.list', () => ({ value: [] }))
+  on('session.usage', ($, e) => ({
+    value: {
+      startedAt: 0,
+      context: {
+        tokens,
+        window: 200_000,
+        percent: 74,
+        ...(e.breakdown === undefined ? {} : { breakdown: { categories: [category('Messages', messages), category('System tools', 22_000), category('System prompt', 9_000)] } }),
+      },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 85, resetsAt: resetsAt.toISOString() },
+        { kind: 'seven_day', percentUsed: 96, resetsAt: new Date(2026, 9, 12, 9, 0).toISOString() },
+      ],
+    } as never,
+  }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const draw = async () => {
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    const band = await $.ui.mount(BAND('desktop', false, 200))
+    const looping = await loopingOf(band)
+    const all = (await svgsOf(band)).map(svg => `${svg.source}${svg.alt}`).join('')
+    await band.unmount()
+    return { looping, all }
+  }
+
+  // The rings grow in, then settle.
+  await draw()
+  await clock.advance(1500)
+  const first = await draw()
+  tokens = 152_000
+  resetsAt = new Date(2026, 9, 9, 15, 10)
+  messages = 90_000
+  await clock.advance(370)
+  const later = await draw()
+
+  expect(first.all).toContain('148k/200k')
+  expect(later.all).toContain('152k/200k')
+  expect(later.all).toContain('3:10pm')
+  expect(later.all).toContain('msgs 74%')
+  expect(later.looping).toEqual(first.looping)
+  expect(first.looping.length).toBe(3)
+  for (const source of first.looping) {
+    expect(source).not.toContain('<text')
+    expect(source).not.toContain('class="part"')
+    expect(timedDelays(source)).toEqual([])
+  }
+})
+
+test('a running arc, a folded group’s arc and every desktop spinner draw the same image however long they run', async ($, on) => {
+  const clock = stubEngine(on)
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const running = toolUse(call('Bash', { command: 'sleep 9' }, { tool_use_id: 'live-sh', isRunning: true }), 'desktop')
+  const calls = [call('Read', {}, { isRunning: true }), call('Grep', { pattern: 'x' })]
+  const group = { ...SITE, surface: 'desktop', component: 'ToolGroup', requestId: 'g-live', props: { calls, isActive: true, isExpanded: false } } as const
+  const spinners = (['thinking', 'tool-use', 'responding', 'requesting'] as const).map(
+    mode => ({ ...SITE, surface: 'desktop', component: 'Spinner', requestId: 'main', props: { word: 'Sauteing', message: null, suffix: '…', mode } }) as const,
+  )
+  const draw = async () => {
+    const found: string[] = []
+    for (const element of [running, group, ...spinners]) {
+      const ui = await $.ui.mount(element)
+      found.push(...(await loopingOf(ui)))
+      await ui.unmount()
+    }
+    return found
+  }
+
+  const first = await draw()
+  await clock.advance(1370)
+  const later = await draw()
+
+  expect(first.length).toBe(6)
+  expect(later).toEqual(first)
+  for (const source of first) {
+    expect(timedDelays(source)).toEqual([])
+  }
+})
+
+test('a band redrawn while its rings grow is the same image, settles once, and its unmoved rings never change', async ($, on) => {
+  let percent = 40
+  const clock = mock.clock(on, { now: 10_000 })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('store.get', () => ({ value: undefined }))
+  on('config.list', () => ({ value: [] }))
+  on('ui.render', () => STOCK)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent }, rateLimits: [{ kind: 'seven_day', percentUsed: 85 }] } }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
+  const rings = async () => {
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    const band = await $.ui.mount(BAND('desktop', false))
+    const looping = await loopingOf(band)
+    await band.unmount()
+    return looping
+  }
+
+  await rings()
+  await clock.advance(1500)
+  const [, weekly] = await rings()
+  percent = 55
+  const growing = await rings()
+  expect(growing[0]).toContain('@keyframes fill')
+  expect(growing[1]).toBe(weekly)
+  await clock.advance(400)
+  expect(await rings()).toEqual(growing)
+  // Settled: one swap of the moved ring, with no growth left in it, and the same from then on.
+  await clock.advance(1100)
+  const settled = await rings()
+  expect(settled[0]).not.toContain('@keyframes fill')
+  expect(settled[1]).toBe(weekly)
+  await clock.advance(5000)
+  expect(await rings()).toEqual(settled)
+})
 
 test('the band shows tokens on the context ring, resets on the plan rings, and the context breakdown', async ($, on) => {
   const { draw, asked } = await bandWith($, on, args => fullUsage(48, args))

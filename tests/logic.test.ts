@@ -11,7 +11,7 @@ import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns, kindOfCell, measure, tableSvg, wrapCell } from '../hooks/svg-table'
 import { outputLines, shellOutputOf, terminalSvg } from '../hooks/svg-terminal'
-import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
+import { limitLabel, meterColor, metersOf, PART_SLOTS, partsOf, RING_W, TRACK_OPACITY, usageSvg } from '../hooks/svg-usage'
 import { contrast, deepen, forTheme, isLightTheme, LIGHT_BG, resolveLight, toLight } from '../hooks/light'
 import { SKINS } from '../hooks/themes'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
@@ -294,6 +294,10 @@ test('code is split into comments, strings, numbers and keywords by language', a
   expect(codeSvg('a\nb', 'ts', tokyoNight.palette, 600).source).toContain('TS')
 })
 
+// Every image of a band, in order, as one string.
+const drawnBand = (built: ReturnType<typeof usageSvg>): string =>
+  [...built.rings.flatMap(({ ring, text }) => [ring.source, text.source]), built.bar?.source ?? ''].join('')
+
 test('plan limits read as 5h and 7d, and a meter warns as it fills', async () => {
   expect(limitLabel('five_hour')).toBe('5h')
   expect(limitLabel('seven_day')).toBe('7d')
@@ -302,9 +306,10 @@ test('plan limits read as 5h and 7d, and a meter warns as it fills', async () =>
     { label: '5h', percent: 100 },
   ])
   expect(meterColor(85, tokyoNight.palette)).toBe(tokyoNight.palette.warn)
-  expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).alt).toBe('context 42%')
+  expect(usageSvg([{ label: 'context', percent: 42 }], tokyoNight.palette).rings[0]?.ring.alt).toBe('context 42%')
   // The ring reads `tmrw`; a reader hears the word.
-  expect(usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).alt).toBe('5h 19% (resets tomorrow 9:00am)')
+  const { ring, text } = usageSvg([{ label: '5h', percent: 19, note: 'tmrw 9:00am' }], tokyoNight.palette).rings[0] ?? {}
+  expect(`${ring?.alt} (${text?.alt})`).toBe('5h 19% (resets tomorrow 9:00am)')
 })
 
 test('the breakdown bar draws no names, its alt carries every part, and one-colour parts step down in opacity', async () => {
@@ -312,10 +317,11 @@ test('the breakdown bar draws no names, its alt carries every part, and one-colo
   const opacitiesOf = (source: string): number[] => [...source.matchAll(/<rect class="part" [^>]*fill-opacity="([\d.]+)"/g)].map(m => Number(m[1]))
 
   for (const [palette, bg] of [[noir.palette, '#262624'], [forTheme(noir, true).palette, LIGHT_BG]] as const) {
-    const { source, alt } = usageSvg([{ label: 'context', percent: 48 }], palette, [], parts)
+    const built = usageSvg([{ label: 'context', percent: 48 }], palette, [], parts)
+    const source = drawnBand(built)
 
     expect(source).not.toContain('msgs')
-    expect(alt).toBe('context 48%; context holds msgs 61%, tools 22%, sys 9%, memory 8%')
+    expect(built.bar?.alt).toBe('context holds msgs 61%, tools 22%, sys 9%, memory 8%')
     expect(opacitiesOf(source)).toEqual([1, 0.8, 0.62, 0.48])
     // The three largest segments read at 3:1 on the page and on their track.
     for (const [i, slot] of (['user', 'run', 'read'] as const).entries()) {
@@ -328,7 +334,7 @@ test('the breakdown bar draws no names, its alt carries every part, and one-colo
   // A skin with a colour per part keeps them at full strength, and so do colours only near each other.
   const near = { ...tokyoNight.palette, user: '#7aa2f7', run: '#7ba3f6', read: '#7ca4f5', write: '#7da5f4' }
   for (const palette of [tokyoNight.palette, near]) {
-    expect(opacitiesOf(usageSvg([{ label: 'context', percent: 48 }], palette, [], parts).source)).toEqual([1, 1, 1, 1])
+    expect(opacitiesOf(usageSvg([{ label: 'context', percent: 48 }], palette, [], parts).bar?.source ?? '')).toEqual([1, 1, 1, 1])
   }
 })
 
@@ -394,21 +400,21 @@ test('the breakdown keeps what fills the window, largest first, as shares of it'
 test('the context ring is a jog ring whose unlit segments chase toward 12, faster and hotter as it fills', async () => {
   const { palette } = tokyoNight
   const circumference = 2 * Math.PI * 8
-  const band = (context: number) => usageSvg([{ label: 'context', percent: context }, { label: '5h', percent: 19 }, { label: '7d', percent: 23 }], palette).source
+  const band = (context: number) => drawnBand(usageSvg([{ label: 'context', percent: context }, { label: '5h', percent: 19 }, { label: '7d', percent: 23 }], palette))
   const chase = (context: number) => {
-    const heads = [...band(context).matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog\d+ ([\d.]+)s/g)]
+    const heads = [...band(context).matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog ([\d.]+)s/g)]
     return { angles: heads.map(m => Number(m[3])), colors: [...new Set(heads.map(m => m[1]))], seconds: [...new Set(heads.map(m => Number(m[4])))], resting: heads.map(m => m[2]) }
   }
   const arc = (source: string) => source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1]
 
   const warned = band(74)
-  expect(warned).toContain('<mask id="jog0"')
-  expect(warned).toContain('<g mask="url(#jog0)">')
+  expect(warned).toContain('<mask id="jog"')
+  expect(warned).toContain('<g mask="url(#jog)">')
   // The mask's dash and gap repeat twelve times around the ring.
   const [dash = 0, gap = 0] = warned.match(/<mask[^>]*><circle[^>]* stroke-dasharray="([\d.]+) ([\d.]+)"/)?.slice(1).map(Number) ?? []
   expect(Math.abs((dash + gap) * 12 - circumference)).toBeLessThan(0.001)
   expect(arc(warned)).toBe(palette.warn)
-  expect(warned).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  expect(warned).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
   // Reduced motion leaves the next segment up at .4 and the rest dark.
   expect(chase(74)).toEqual({ angles: [180, 210, 240], colors: [palette.warn], seconds: [2.4], resting: ['0.4', '0', '0'] })
   expect(warned).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
@@ -427,16 +433,14 @@ test('the context ring is a jog ring whose unlit segments chase toward 12, faste
   expect(full).not.toContain('dim 1.2s')
   expect(chase(99)).toMatchObject({ angles: [240], colors: [palette.err], seconds: [1.2] })
   expect(band(99)).toContain('@keyframes dim{50%{opacity:.6}}')
-  expect(band(99)).toContain(',dim 1.2s ease-in-out 0ms infinite"')
+  expect(band(99)).toContain(',dim 1.2s ease-in-out infinite"')
 
   // The plan rings share the twelve segments under their own masks, square-ended, in their
   // meter colour; well short of the limit they hold still.
   for (const source of [warned, full]) {
     const plans = source.slice(source.indexOf('</text>'))
-    expect(plans).toContain('<mask id="jog1"')
-    expect(plans).toContain('<g mask="url(#jog1)">')
-    expect(plans).toContain('<mask id="jog2"')
-    expect(plans).toContain('<g mask="url(#jog2)">')
+    expect(plans.match(/<mask id="jog"/g)?.length).toBe(2)
+    expect(plans.match(/<g mask="url\(#jog\)">/g)?.length).toBe(2)
     expect(plans.match(/<circle/g)?.length).toBe(6)
     expect(plans).not.toContain('animation:jog')
     expect(plans).not.toContain('linecap')
@@ -448,8 +452,8 @@ test('a plan ring is a still jog ring until 80%, then chases in the warning colo
   const { palette } = tokyoNight
   for (const label of ['5h', '7d']) {
     const ring = (percent: number) => {
-      const source = usageSvg([{ label, percent }], palette).source
-      const heads = [...source.matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog0 ([\d.]+)s/g)]
+      const source = drawnBand(usageSvg([{ label, percent }], palette))
+      const heads = [...source.matchAll(/ stroke="([^"]+)"[^>]* opacity="([\d.]+)" transform="rotate\((-?\d+) [^"]*" style="animation:jog ([\d.]+)s/g)]
       return {
         source,
         arc: source.match(/class="fill"[^>]* stroke="([^"]+)"/)?.[1],
@@ -458,15 +462,15 @@ test('a plan ring is a still jog ring until 80%, then chases in the warning colo
     }
 
     const still = ring(79)
-    expect(still.source).toContain('<g mask="url(#jog0)">')
-    expect(still.source).not.toContain('jog0{')
+    expect(still.source).toContain('<g mask="url(#jog)">')
+    expect(still.source).not.toContain('@keyframes jog')
     expect(still.chase.angles).toEqual([])
     expect(still.arc).toBe(meterColor(79, palette))
 
     const near = ring(85)
     expect(near.arc).toBe(palette.warn)
     expect(near.chase).toEqual({ angles: [210, 240], colors: [palette.warn], seconds: [3], resting: ['0.4', '0'] })
-    expect(near.source).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
+    expect(near.source).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
 
     const over = ring(96)
     expect(over.arc).toBe(palette.err)
@@ -476,91 +480,68 @@ test('a plan ring is a still jog ring until 80%, then chases in the warning colo
     expect(over.source).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important}}')
   }
 
-  // Beside a chasing context ring, each ring chases on its own keyframes.
-  const both = usageSvg([{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }], palette).source
-  expect(both).toContain('@keyframes jog0{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
-  expect(both).toContain('@keyframes jog1{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
+  // Beside a chasing context ring, each ring chases on its own keyframes, in its own image.
+  const [context, plan] = usageSvg([{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }], palette).rings
+  expect(context?.ring.source).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.75}}')
+  expect(plan?.ring.source).toContain('@keyframes jog{0%,45%,100%{opacity:0}18%{opacity:0.5}}')
 })
 
-// Every looping animation in an image, in order: its name, period in ms and delay in ms.
-const loops = (source: string) =>
-  [...source.matchAll(/(\w+) ([\d.]+)s (?:ease-in-out|ease-out|linear) (-?\d+)ms infinite/g)].map(m => ({ name: m[1], period: Number(m[2]) * 1000, delay: Number(m[3]) }))
-
-// Whether a loop delayed `a` lags one delayed `b` by `ms`, in a loop `period` long, within
-// a rounding ms: a delay further below zero is further on.
-const lags = (a: number, b: number, ms: number, period: number) => {
-  const off = (((a - b - ms) % period) + period) % period
-  return Math.min(off, period - off) <= 2
-}
-
-test('a band drawn again carries every chase and the dim on mid-cycle, and grows its fill once', async () => {
+test('a ring is an image of its reading alone: its note, the bar and the other rings leave it the same', async () => {
   const { palette } = tokyoNight
-  const t = 1_760_000_123_456
-  for (const meters of [
-    [{ label: 'context', percent: 74 }, { label: '5h', percent: 85 }, { label: '7d', percent: 96 }],
-    [{ label: 'context', percent: 20 }],
-    [{ label: 'context', percent: 99 }],
-  ]) {
-    const starts = meters.map(meter => meter.percent - 10)
-    const first = usageSvg(meters, palette, starts, undefined, t).source
-    const later = usageSvg(meters, palette, starts, undefined, t + 370).source
-    const [a, b] = [loops(first), loops(later)]
+  const parts = partsOf([{ name: 'Messages', tokens: 61 }, { name: 'System tools', tokens: 22 }])
+  const a = usageSvg([{ label: 'context', percent: 74, note: '148k/200k' }, { label: '5h', percent: 85, note: '2:40pm' }, { label: '7d', percent: 99 }], palette, [74, 85, 99], parts)
+  const b = usageSvg([{ label: 'context', percent: 74, note: '150k/200k' }, { label: '5h', percent: 85, note: 'tmrw 9:00am' }, { label: '7d', percent: 99, note: 'Mon 9:00am' }], palette, [74, 85, 99], [])
 
-    expect(a.length).toBeGreaterThan(0)
-    expect(b.map(loop => loop.name)).toEqual(a.map(loop => loop.name))
-    a.forEach((loop, i) => expect(lags(loop.delay, b[i]?.delay ?? NaN, 370, loop.period)).toBe(true))
-    // The fill grows once, from the same start, with no delay, in both drawings.
-    expect(first.match(/@keyframes fill0\{[^}]*\}\}/)?.[0]).toBe(later.match(/@keyframes fill0\{[^}]*\}\}/)?.[0])
-    expect(first).toMatch(/animation:fill0 \.9s cubic-bezier\(\.2,\.8,\.2,1\)[,"]/)
+  expect(b.rings.map(({ ring }) => ring.source)).toEqual(a.rings.map(({ ring }) => ring.source))
+  expect(b.rings.map(({ ring }) => ring.alt)).toEqual(['context 74%', '5h 85%', '7d 99%'])
+  // The same reading as the 5h ring, on the 7d ring, draws the same image.
+  expect(usageSvg([{ label: '7d', percent: 85 }], palette, [85]).rings[0]?.ring.source).toBe(a.rings[1]?.ring.source)
+  for (const { ring } of a.rings) {
+    expect(ring.source).not.toContain('<text')
+    expect(ring.width).toBe(RING_W)
   }
 
-  // Each segment of a chase still lights a step after the one before it.
-  const chase = loops(usageSvg([{ label: 'context', percent: 74 }], palette, [74], undefined, t).source)
-  expect(chase.map(loop => loop.name)).toEqual(['jog0', 'jog0', 'jog0'])
-  chase.forEach((loop, n) => expect(lags(loop.delay, chase[0]?.delay ?? NaN, n * 240, 2400)).toBe(true))
-  expect(loops(usageSvg([{ label: 'context', percent: 99 }], palette, [99], undefined, t).source).map(loop => loop.name)).toEqual(['dim', 'jog0'])
+  // Its loops start at fixed offsets: one segment a step after the one before, never a time.
+  const delays = (source = '') => [...source.matchAll(/(-?\d+)ms infinite/g)].map(m => Number(m[1]))
+  expect(delays(a.rings[0]?.ring.source)).toEqual([0, 240, 480])
+  expect(drawnBand(a)).not.toMatch(/-\d+ms/)
+
+  // The images side by side are as wide as the band.
+  const widths = [...a.rings.flatMap(({ ring, text }) => [ring.width, text.width]), a.bar?.width ?? 0]
+  expect(widths.reduce((sum, width) => sum + width, 0)).toBe(a.width)
+  expect(a.rings.map(({ text }) => text.alt)).toEqual(['148k/200k tokens', 'resets 2:40pm', ''])
 })
 
-test('a band with nothing moving, or held still, draws the same image whenever it draws', async () => {
+test('a growing ring changes once, when it settles; held still every looping image holds still', async () => {
   const { palette } = tokyoNight
-  const plans = [{ label: '5h', percent: 40 }, { label: '7d', percent: 79 }]
-  expect(usageSvg(plans, palette, [40, 79], undefined, 1000).source).toBe(usageSvg(plans, palette, [40, 79], undefined, 1370).source)
+  const growing = usageSvg([{ label: 'context', percent: 55 }], palette, [40]).rings[0]?.ring.source ?? ''
+  const settled = usageSvg([{ label: 'context', percent: 55 }], palette, [55]).rings[0]?.ring.source ?? ''
+
+  expect(growing).toContain('@keyframes fill{from{stroke-dasharray:')
+  expect(growing).toContain('animation:fill .9s cubic-bezier(.2,.8,.2,1)"')
+  expect(settled).not.toContain('fill .9s')
+  expect(usageSvg([{ label: 'context', percent: 55 }], palette, [40]).rings[0]?.ring.source).toBe(growing)
 
   holdStill(true)
   try {
-    const meters = [{ label: 'context', percent: 99 }, { label: '5h', percent: 96 }]
-    const held = usageSvg(meters, palette, [99, 96], undefined, 1000).source
-    expect(held).toBe(usageSvg(meters, palette, [99, 96], undefined, 1370).source)
-    expect(held).toContain('*{animation:none!important}</style>')
-    expect(toolIcon('run', '#fff', true, undefined, 1000)).toBe(toolIcon('run', '#fff', true, undefined, 1370))
+    for (const source of [usageSvg([{ label: 'context', percent: 99 }], palette, [99]).rings[0]?.ring.source ?? '', toolIcon('run', '#fff', true), spinnerIcon('responding', '#fff')]) {
+      expect(source).toContain('*{animation:none!important}</style>')
+    }
   } finally {
     holdStill(false)
   }
+
+  expect(toolIcon('run', '#fff', true)).not.toContain('*{animation:none!important}</style>')
 })
 
-test('a running arc and every spinner carry on mid-cycle when drawn again; a still icon holds no time', async () => {
-  const t = 1_760_000_123_456
-  const pairs = [
-    [toolIcon('run', '#fff', true, undefined, t), toolIcon('run', '#fff', true, undefined, t + 370)],
-    ...(['thinking', 'tool-use', 'responding', 'requesting'] as const).map(mode => [spinnerIcon(mode, '#fff', t), spinnerIcon(mode, '#fff', t + 370)]),
-  ]
-
-  for (const [first = '', later = ''] of pairs) {
-    const [a, b] = [loops(first), loops(later)]
-    expect(a.length).toBeGreaterThan(0)
-    expect(b.map(loop => loop.name)).toEqual(a.map(loop => loop.name))
-    a.forEach((loop, i) => expect(lags(loop.delay, b[i]?.delay ?? NaN, 370, loop.period)).toBe(true))
+test('a running arc and every spinner loop from fixed offsets, the bars and dots .15s apart', async () => {
+  for (const source of [toolIcon('run', '#fff', true), ...(['thinking', 'tool-use', 'responding', 'requesting'] as const).map(mode => spinnerIcon(mode, '#fff'))]) {
+    expect(source).toContain('infinite')
+    expect(source).not.toMatch(/-\d+ms/)
   }
 
-  // The bars and the dots still rise one after another, .15s apart.
-  for (const mode of ['responding', 'requesting'] as const) {
-    const staggered = loops(spinnerIcon(mode, '#fff', t))
-    expect(staggered.length).toBe(3)
-    staggered.forEach((loop, n) => expect(lags(loop.delay, staggered[0]?.delay ?? NaN, n * 150, loop.period)).toBe(true))
-  }
-
-  expect(toolIcon('run', '#fff', false, undefined, t)).toBe(toolIcon('run', '#fff', false))
-  expect(toolIcon('run', '#fff', false, 'failed', t)).toBe(toolIcon('run', '#fff', false, 'failed'))
+  expect(spinnerIcon('responding', '#fff')).toContain('.b2{animation-delay:.15s}.b3{animation-delay:.3s}')
+  expect(spinnerIcon('requesting', '#fff')).toContain('.d2{animation-delay:.15s}.d3{animation-delay:.3s}')
 })
 
 test('a long cell wraps on its words, breaks a word too long for the column, and keeps every word', async () => {
