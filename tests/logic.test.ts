@@ -6,7 +6,7 @@ import { runDesign } from '../hooks/designer'
 import { clipLines, compactCount, diffstat, formatDuration, formatMs, pick, resetLabel, shortenPath } from '../hooks/format'
 import { columnWidths, cutCell, padCell, plainTable, splitReply, widthOf } from '../hooks/markdown'
 import { codeSvg, tokenize } from '../hooks/svg-code'
-import { holdStill, isLooping, MAX_ALT } from '../hooks/svg-kit'
+import { holdStill, isLooping, MAX_ALT, measure } from '../hooks/svg-kit'
 import { spinnerIcon, toolIcon } from '../hooks/icons'
 import { diffLines, diffSvg, hunksOf, patchText, TINT_OPACITY } from '../hooks/svg-diff'
 import { fitColumns } from '../hooks/table-card'
@@ -113,6 +113,14 @@ test('columns narrow from the widest until the table fits, and cells pad to thei
   expect(columnWidths(table, 20, 3)).toEqual([15, 2])
   expect(padCell('abc', 6, 'right')).toBe('   abc')
   expect(padCell('abcdefgh', 5, 'left')).toBe('abcd…')
+})
+
+test('wide characters measure about an em on the desktop, twice a Latin letter', async () => {
+  const ratio = measure('設定ファ', false, 15) / measure('abcd', false, 15)
+
+  expect(ratio).toBeGreaterThanOrEqual(1.8)
+  expect(ratio).toBeLessThanOrEqual(2)
+  expect(measure('中文', true, 15)).toBeGreaterThanOrEqual(1.8 * 0.54 * 15)
 })
 
 test('wide characters count two cells, so CJK cells are measured and cut in terminal cells', async () => {

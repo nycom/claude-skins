@@ -13,7 +13,7 @@ import { codeSvg } from './svg-code'
 import { diffSvg, patchText } from './svg-diff'
 import type { DiffInput } from './svg-diff'
 import { PX_PER_COLUMN, cardWidth, isLooping } from './svg-kit'
-import { JUSTIFY, tableCard } from './table-card'
+import { gridCost, JUSTIFY, MAX_GRID_COLUMNS, MAX_GRID_NODES, tableCard } from './table-card'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
 import { BAND_H, COMPACT_NUDGE, COMPACT_SHOW, partCells, usageLine, usageSvg } from './svg-usage'
@@ -377,9 +377,11 @@ function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt:
   )
 }
 
-// A table as markdown again, for the clipboard.
+// A table as markdown again, its alignment kept: for the clipboard, and for the desktop
+// where a table is too big for a grid.
+const RULE = { left: '---', right: '--:', center: ':-:' } as const
 const tableMarkdown = (table: Table): string =>
-  [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
+  [table.header, table.header.map((_, i) => RULE[table.align[i] ?? 'left']), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
 
 // A copy button, an icon; nothing where nothing can copy.
 function copyButton(look: Look, key: string, text: string) {
@@ -407,6 +409,9 @@ export function copyRow(look: Look, key: string, text: string) {
 
 export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement) {
   const { Box, Markdown } = look.ui
+  // The desktop refuses a whole reply past its element limit, so native grids share a
+  // budget in reply order; a table past it, or too wide to split, stays the surface's markdown.
+  let gridBudget = MAX_GRID_NODES
 
   return (
     <Box flexDirection="column">
@@ -428,10 +433,25 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
 
         const markdown = tableMarkdown(segment)
 
+        if (Svg === undefined) {
+          return tableRows(look, plainTable(segment), maxWidth, copyButton(look, `copy-${i}`, markdown))
+        }
+
+        const cost = gridCost(segment)
+
+        if (cost > gridBudget || segment.header.length > MAX_GRID_COLUMNS) {
+          return (
+            <Box flexDirection="column">
+              <Markdown text={markdown} />
+              {copyRow(look, `copy-${i}`, markdown)}
+            </Box>
+          )
+        }
+
+        gridBudget -= cost
+
         // The desktop card's header slot fits one glyph, so it keeps the glyph whatever the icon set.
-        return Svg === undefined
-          ? tableRows(look, plainTable(segment), maxWidth, copyButton(look, `copy-${i}`, markdown))
-          : tableCard(look, segment, maxWidth, copyButton({ ...look, icons: ICONS.unicode }, `copy-${i}`, markdown))
+        return tableCard(look, segment, maxWidth, copyButton({ ...look, icons: ICONS.unicode }, `copy-${i}`, markdown))
       })}
     </Box>
   )

@@ -28,6 +28,16 @@ const HEAD_SIZE = SIZE + 1
 const CELL_PAD = Math.ceil(2 * PAD_X * 8)
 const MIN_COL = 56
 
+// The desktop draws at most 2000 elements a reply; native grids get most of that, the
+// reply's text and other cards the rest.
+export const MAX_GRID_NODES = 1500
+// Past this many columns, a column of a narrow card is little more than its padding.
+export const MAX_GRID_COLUMNS = 12
+
+// Elements a card draws: per row a Box and, per cell, a Box and its content, plus the
+// card, the Copy slot's boxes and the button.
+export const gridCost = (table: Table): number => (table.rows.length + 1) * (1 + 2 * table.header.length) + 4
+
 export const JUSTIFY = { left: 'flex-start', right: 'flex-end', center: 'center' } as const
 
 // A cell's text as the surface shows it, in runs: a link by its label, code spans in the

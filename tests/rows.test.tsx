@@ -937,6 +937,19 @@ test('a desktop table card draws long headers and cells in full, and a column ne
   await ui.unmount()
 })
 
+test('a desktop table column of CJK text is at least as wide as its text', async ($, on) => {
+  stubEngine(on)
+  const cjk = '設定ファイルの場所'
+  const long = 'the unit restarts it on failure with a five second backoff, which held when the process was killed twice'
+  const ui = await $.ui.mount(desktopReply('cjk-tb', `| 名前 | Why |\n| --- | --- |\n| ${cjk} | ${long} ${long} |`))
+  type Node = { props?: { width?: unknown }; children?: readonly Node[] }
+  const header = ((await ui.find({ type: 'Box' })) as Node).children?.[0]?.children?.[0]
+  const share = Number.parseFloat(String(header?.children?.[0]?.props?.width))
+
+  expect((share / 100) * 100 * PX_PER_COLUMN).toBeGreaterThanOrEqual([...cjk].length * 15)
+  await ui.unmount()
+})
+
 test('a link in a desktop table cell is the surface’s own link, inline in its cell, with no row of links under the card', async ($, on) => {
   stubEngine(on)
   const ui = await $.ui.mount(desktopReply('link-tb', '| Client | Docs |\n| --- | --- |\n| Robot | see [README](https://github.com/nycom/orion#readme) first |'))
@@ -945,6 +958,47 @@ test('a link in a desktop table cell is the surface’s own link, inline in its 
   expect(await ui.find({ type: 'Link' })).toBeUndefined()
   expect(await ui.find({ type: 'Svg' })).toBeUndefined()
   await ui.unmount()
+})
+
+const nodesOf = (node: unknown): number => {
+  const element = (typeof node === 'object' && node !== null ? node : {}) as Drawn
+  return 1 + (element.children ?? []).reduce<number>((sum, child) => sum + nodesOf(child), 0)
+}
+const tableOf = (rows: number, cols: number) => {
+  const line = (cell: (c: number) => string) => `| ${Array.from({ length: cols }, (_, c) => cell(c)).join(' | ')} |`
+  return [line(c => `H${c}`), line(() => '---'), ...Array.from({ length: rows }, (_, r) => line(c => `r${r}c${c}`))].join('\n')
+}
+
+test('a desktop table too big or too wide for a native grid is one markdown block, and the reply stays drawable', async ($, on) => {
+  stubEngine(on)
+  for (const [rows, cols] of [[200, 5], [120, 8], [3, 30]] as const) {
+    const text = tableOf(rows, cols)
+    const ui = await $.ui.mount(desktopReply(`big-${rows}x${cols}`, text))
+    const drawn = await ui.drawn()
+    const markdowns = await ui.findAll({ type: 'Markdown' })
+
+    expect(nodesOf(drawn)).toBeLessThan(2000)
+    expect(markdowns).toHaveLength(1)
+    expect(String(markdowns[0]?.props.text)).toContain(`| r${rows - 1}c0 |`)
+    await ui.unmount()
+  }
+
+  // The markdown keeps a column's alignment.
+  const aligned = await $.ui.mount(desktopReply('big-align', tableOf(3, 13).replace('| --- |', '| --: |')))
+  expect(await aligned.find({ type: 'Markdown', text: /^\| H0 [^\n]*\n\| --: \| --- \|/ })).toBeDefined()
+  await aligned.unmount()
+
+  // Two tables that fit alone but not together: the first stays a grid, the second falls back.
+  const ui = await $.ui.mount(desktopReply('big-pair', `${tableOf(90, 5)}\n\ntext\n\n${tableOf(90, 5)}`))
+  expect(nodesOf(await ui.drawn())).toBeLessThan(2000)
+  expect(await ui.find({ type: 'Markdown', text: /\| r89c0 \|/ })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: 'r0c0' })).toBeDefined()
+  await ui.unmount()
+
+  // A normal table still draws natively.
+  const small = await $.ui.mount(desktopReply('big-small', tableOf(10, 4)))
+  expect(await small.find({ type: 'Markdown', text: 'r9c3' })).toBeDefined()
+  await small.unmount()
 })
 
 test('a desktop table is drawn once: it sets no settle timer and never holds a redraw', async ($, on) => {

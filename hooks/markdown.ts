@@ -142,7 +142,7 @@ const WIDE: readonly (readonly [number, number])[] = [
   [0x20000, 0x3fffd],
 ]
 
-const charWidth = (char: string): number => {
+export const charWidth = (char: string): number => {
   const code = char.codePointAt(0) ?? 0
 
   if (/\p{Mn}|\p{Me}|\u200d|[\ufe00-\ufe0f]|\p{Emoji_Modifier}/u.test(char)) {
